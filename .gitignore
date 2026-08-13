@@ -1,0 +1,25 @@
+# Local reference clone of BB-84C/opencode-mobile-solution — research material
+# only, never part of this repository (kept out on purpose, do not re-add).
+reference/
+
+# Project-local agent instructions (machine/project-specific, not for publication).
+AGENTS.md
+
+# Dependencies and build outputs
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# Logs and temp
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
