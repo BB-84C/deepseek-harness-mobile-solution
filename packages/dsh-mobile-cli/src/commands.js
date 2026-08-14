@@ -138,6 +138,9 @@ async function cmdService(args) {
   switch (action) {
     case "start": {
       const authorities = await computeAuthorities(config);
+      if (!process.env.DEEPSEEK_API_KEY) {
+        console.warn("warning: DEEPSEEK_API_KEY is not set in THIS shell. The resident instance inherits this shell's environment, so the phone will report 'no api key configured'. Start the service from a shell where the key is set (machine-level environment variables are inherited automatically).");
+      }
       const result = service.startService({ config, authorities, logPath });
       if (!result.started) {
         console.log(result.alreadyRunning ? `service already running (pid ${result.pid})` : `service failed to start: ${result.error ?? "unknown error"}`);

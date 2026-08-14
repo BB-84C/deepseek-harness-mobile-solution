@@ -27,6 +27,22 @@ dsh --profile mobile service logs       # last 50 lines; logs [n] for n lines
 - `webPort` defaults to 3080 (the official default). If something else already
   occupies it, change it: `dsh --profile mobile config set webPort 3090`.
 
+## Environment & API keys
+
+The resident instance **inherits the launching shell's full environment** —
+this is the credential path, and it is deliberate: the phone is only a
+frontend, the key never travels to it.
+
+- Machine- or user-level environment variables (`DEEPSEEK_API_KEY`) are
+  inherited automatically by any shell, so `service start` from your normal
+  PowerShell/zsh/bash terminal passes the key straight through.
+- If you start the service from a stripped-down shell (CI, a sandbox, a
+  remote session with a sanitized environment), the instance will report
+  "no api key configured" on the phone. `service start` prints a warning when
+  it detects that; fix it by restarting from a shell that has the key.
+- `.env` files also work: dsh's own layered env loads
+  `<invoking-directory>/.env` then `$DSH_HOME/.env` at launch.
+
 ## Start on login (optional)
 
 The service itself is process-detached (survives the launching shell); the
