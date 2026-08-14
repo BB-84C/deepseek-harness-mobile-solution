@@ -47,7 +47,9 @@ async function computeAuthorities(config) {
   if (config.mode === "relay") {
     const base = (config.relay?.url ?? "").replace(/^https?:\/\//, "").replace(/\/+$/, "");
     if (!base) fail("relay.url is not configured; run: dsh --profile mobile relay connect <relay-url>");
-    return unique([base, `${base.split("/")[0]}:443`]);
+    // The browser origin is the relay host[:port] (path prefixes, if any, are
+    // not part of the authority). Dedupe covers the no-path case.
+    return unique([base, base.split("/")[0]]);
   }
   const ip = tailscale.tailscaleIp4();
   const host = tailscale.tailscaleHostname();

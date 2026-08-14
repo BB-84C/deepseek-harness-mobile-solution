@@ -198,15 +198,12 @@ update                        升级两个插件（转发 dsh plugin update）�
 | M4 | 设备配对与安全加固 | 配对码兑换、哈希存储、撤销踢会话、限速、文档化威胁模型 | ⬜ |
 | M5 | 部署与文档 | tailscale/VPS relay 部署脚本与教程、插件安装说明、三平台自启模板 | 🔄 文档/脚本已写，实测待 M7 |
 | M6 | 移动 UI/UX specs | mobile-web / mobile-app（Android+iOS）specs（交其他 agent） | ⬜ |
-| M7 | 端到端验收 | 本机 tailscale P2P 实测 + relay 模拟实测；README 完善；发布前检查 | ⬜ |
+| M7 | 端到端验收 | 本机 tailscale P2P 实测 + relay 模拟实测；README 完善；发布前检查 | ✅ 本机全链路通过（详见 docs/acceptance.md；第二设备/VPS/多平台项待用户复核） |
 
-当前进度：M1 ✅（本机 E2E：doctor/status/tailscale/config/service 全实测；stop 防误杀红线验证）。
-M2 收尾中：gateway 已交付（846 行：认证/反代/SSE/WS/配对/侧车/审计），待与 specs 对齐两处契约
-（POST /mobile/pair 的 JSON 形态、/mobile/api/status 响应形状）后全链路验收。
-M3 ✅（relay 22/22 + tunnel 7/7 + relay↔tunnel E2E；协议 v2：gateway 是唯一认证边界）。
-M4 部分完成（常量时间比较已入 relay tokens + device store）；passkey（relay owner WebAuthn）待实现。
-M5 ✅ 文档/脚本/自启模板交付（91/91 全仓测试绿；relay 二进制冒烟通过）。
-M6 ✅ specs 交付（mobile-web 10 节 + mobile-app 9 节，含官方 /api 契约快照与发现程序）。
+当前进度：**全部里程碑代码完成，本机端到端验收通过**（docs/acceptance.md，2026-08-14）：
+tailscale 点对点（gateway 绑 tailnet 可达、配对、官方 SPA 代理、撤销踢会话、限速、开放重定向防护）
+与 relay fan-in（本机真实 relay + 隧道 + 深链配对 + 官方 SPA 全链路）均实测通过；防误杀红线实测通过。
+剩余仅用户侧复核项：第二设备真机浏览器、真实 VPS 部署、macOS/Linux 实测、双实例 fan-in。
 
 ## 5. 仓库布局
 

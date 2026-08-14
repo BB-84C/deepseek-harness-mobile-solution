@@ -9,7 +9,7 @@ Your `dsh` keeps running on your home/office machine. This project adds a mobile
 
 Both transports land on the same surface: the **official dsh Web GUI** served through an authenticating mobile gateway, plus a **native mobile app (Android/iOS)** whose specs live in [`docs/specs/`](docs/specs/).
 
-> **Status:** early development. The repository is currently private; it is kept publish-ready so it can be opened later without a rewrite.
+> **Status:** functional on Windows (full local acceptance passed — see `docs/acceptance.md`); macOS/Linux and second-device/VPS verification pending. The repository is currently private; it is kept publish-ready so it can be opened later without a rewrite.
 
 ## How it works
 

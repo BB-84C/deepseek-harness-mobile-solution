@@ -24,3 +24,8 @@ Thumbs.db
 !.env.example
 *.pem
 *.key
+
+# Local E2E test artifacts
+.m7-*
+.relay-*
+*.out
