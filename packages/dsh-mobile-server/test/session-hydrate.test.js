@@ -82,7 +82,7 @@ const silentLogger = { info() {}, warn() {} };
 
 test("module exports a Cordis plugin shape", () => {
   assert.equal(name, "mobile-session-hydrate");
-  assert.deepEqual(inject, ["sessions"]);
+  assert.deepEqual(inject, ["sessions", "sessionPersistence"]);
   assert.equal(typeof apply, "function");
   assert.equal(typeof reconcile, "function");
 });
