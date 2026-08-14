@@ -103,3 +103,28 @@ machines.
   they belong to.
 - Keep `tokens.json` (`/var/lib/dsh-relay/tokens.json`) readable only by the
   relay user; it contains hashes, not raw tokens.
+
+## 7. Connectivity probe (no dsh instance required)
+
+`scripts/relay-probe.mjs` opens a REAL tunnel from any machine to the relay and
+round-trips one request through the public deep-link path — useful before
+committing the resident service:
+
+```sh
+node scripts/relay-probe.mjs --relay https://dsh.bb84.ai --instance-token <instance-token>
+# optional: --client-token <token> to also verify the directory API
+```
+
+Expect `PROBE_OK`: tunnel connected, deep-link 200 with `x-relay-instance`,
+unknown instance 404.
+
+## 8. Owner-token recovery
+
+The bootstrap token is consumed by the first `/relay/api/setup`. To regain an
+owner session later (new client tokens, dashboard, passkey registration):
+
+1. On the VPS: put a fresh 64-hex token into
+   `/etc/bb84-vps/dsh-relay.env` (`DSH_RELAY_BOOTSTRAP_TOKEN=...`) and
+   `sudo systemctl restart dsh-relay`.
+2. Open `https://dsh.bb84.ai/relay/`, submit the new bootstrap, and register a
+   **passkey** — from then on the passkey alone reopens the owner session.
