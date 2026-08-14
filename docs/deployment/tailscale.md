@@ -94,3 +94,4 @@ phone browser itself.
 | Peer shows but page times out | firewall blocking the gateway port on the host; check bind with `dsh --profile mobile service status` |
 | `dsh --profile mobile url` prints the IP but no hostname | MagicDNS off — IP URL works the same |
 | `Couldn't open folder` / `crypto.randomUUID is not a function` on the phone | secure-context limitation of plain http — the gateway polyfills it automatically (update the checkout and `service restart`); for the complete fix run `dsh --profile mobile tailscale serve on` and use the https URL |
+| `tailscale Serve is not enabled on this tailnet` | one-time admin step: open the printed `login.tailscale.com/f/serve?...` link and click through, then re-run `dsh --profile mobile tailscale serve on` |

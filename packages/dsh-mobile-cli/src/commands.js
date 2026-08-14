@@ -223,7 +223,12 @@ async function cmdTailscale(args) {
       if (subAction === "on") {
         const { config } = loadConfig();
         const result = tailscale.tailscaleServeOn(config.gatewayPort ?? 3081);
-        if (!result.ok) fail(result.error ?? `tailscale serve failed: ${result.stderr ?? ""}`.trim());
+        if (result.needsTailnetEnablement) {
+          console.log("tailscale Serve is not enabled on this tailnet yet (one-time admin step):");
+          console.log(`  open ${result.enableUrl} and click through, then re-run this command`);
+          return 1;
+        }
+        if (!result.ok) fail(result.error ?? `tailscale serve failed: ${(result.stderr || result.stdout || "").trim()}`);
         console.log(result.stdout || "tailscale serve enabled");
         const host = tailscale.tailscaleHostname();
         console.log(host ? `remote URL: https://${host}/` : "remote URL: https://<your-node>.ts.net/");

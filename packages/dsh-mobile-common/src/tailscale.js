@@ -147,14 +147,30 @@ export function tailscaleServeStatus(opts = {}) {
  * Enable `tailscale serve` HTTPS for the mobile gateway: the node's MagicDNS
  * name gets a Let's-Encrypt-backed cert and forwards :443 to the loopback
  * gateway. `--bg` keeps the config active across tailscaled restarts.
+ *
+ * When the tailnet has not enabled Serve yet, the CLI prints a one-time
+ * enablement link and WAITS for the user — detect that instead of hanging:
+ * the result then carries `needsTailnetEnablement: true` and `enableUrl`.
  */
 export function tailscaleServeOn(targetPort = 3081, opts = {}) {
-  return run(['serve', '--bg', '--https=443', `http://127.0.0.1:${targetPort}`], opts);
+  const r = run(['serve', '--bg', '--https=443', `http://127.0.0.1:${targetPort}`], { ...opts, timeoutMs: opts.timeoutMs ?? 45000 });
+  const combined = `${r.stdout}\n${r.stderr}`;
+  const enableMatch = /https:\/\/login\.tailscale\.com\/f\/serve\?node=[A-Za-z0-9]+/.exec(combined);
+  if (enableMatch) {
+    return {
+      ...r,
+      ok: false,
+      needsTailnetEnablement: true,
+      enableUrl: enableMatch[0],
+      error: 'tailscale Serve is not enabled on this tailnet',
+    };
+  }
+  return r;
 }
 
 /** Disable the tailscale serve HTTPS mapping. */
 export function tailscaleServeOff(opts = {}) {
-  return run(['serve', '--https=443', 'off'], opts);
+  return run(['serve', '--https=443', 'off'], { ...opts, timeoutMs: opts.timeoutMs ?? 60000 });
 }
 
 /**
