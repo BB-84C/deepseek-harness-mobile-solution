@@ -7,10 +7,9 @@
  */
 
 import { spawnSync } from "node:child_process";
-import fs from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureMobileDirs, logsDir, resolveMobileHome, mobilePaths } from "@bb-84c/dsh-mobile-common/home.js";
+import { ensureMobileDirs, logsDir, resolveMobileHome } from "@bb-84c/dsh-mobile-common/home.js";
 import { loadConfig, saveConfig, setConfigValue, getConfigValue } from "@bb-84c/dsh-mobile-common/config.js";
 import * as tailscale from "@bb-84c/dsh-mobile-common/tailscale.js";
 import * as service from "@bb-84c/dsh-mobile-common/service.js";
@@ -38,37 +37,6 @@ function mustConfig() {
 /** Unique, order-preserving, empty-free. */
 function unique(values) {
   return [...new Set(values.filter((v) => v !== "" && v !== undefined && v !== null))];
-}
-
-// ── attach/detach state (data/attach-state.json) ────────────────────────────
-
-function attachStatePath() {
-  return join(mobilePaths().dataDir, "attach-state.json");
-}
-
-function writeAttachState(state) {
-  try {
-    fs.mkdirSync(mobilePaths().dataDir, { recursive: true });
-    fs.writeFileSync(attachStatePath(), JSON.stringify(state, null, 2), "utf8");
-  } catch {
-    // best effort
-  }
-}
-
-function readAttachState() {
-  try {
-    return JSON.parse(fs.readFileSync(attachStatePath(), "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-function clearAttachState() {
-  try {
-    fs.unlinkSync(attachStatePath());
-  } catch {
-    // absent
-  }
 }
 
 /** Compute the --trusted-host authorities for the resident web instance:
@@ -167,23 +135,40 @@ async function cmdService(args) {
   ensureMobileDirs();
   const logPath = join(logsDir(), "service.log");
 
-  switch (action) {
-    case "start": {
-      const authorities = await computeAuthorities(config);
-      if (!process.env.DEEPSEEK_API_KEY) {
-        console.warn("warning: DEEPSEEK_API_KEY is not set in THIS shell. The resident instance inherits this shell's environment, so the phone will report 'no api key configured'. Start the service from a shell where the key is set (machine-level environment variables are inherited automatically).");
-      }
-      const result = service.startService({ config, authorities, logPath });
-      if (!result.started) {
-        console.log(result.alreadyRunning ? `service already running (pid ${result.pid})` : `service failed to start: ${result.error ?? "unknown error"}`);
-        return result.alreadyRunning ? 0 : 1;
-      }
-      console.log(`service started (pid ${result.pid})`);
-      console.log(`  logs : ${logPath}`);
-      console.log(`  web  : ${await mobileUrl(config)}`);
-      console.log("pair your phone: dsh --profile mobile device pair --name <name>");
-      return 0;
+  /** One-instance guard: refuse to start when the port is held by a process
+   * that is NOT our tracked instance (i.e. another dsh web). */
+  async function startGuarded() {
+    const port = config.webPort ?? 3080;
+    const occupied = !(await checkPortFree(port)).free;
+    if (occupied && !service.serviceStatus({ config }).running) {
+      console.error(`port ${port} is occupied by another process — most likely your existing dsh web.`);
+      console.error('This machine must run ONE dsh web (session logs are single-writer).');
+      console.error('Stop that instance, then re-run:');
+      console.error('  dsh --profile mobile service start');
+      console.error('');
+      console.error('Nothing is lost: sessions live on disk under $DSH_HOME/sessions and the');
+      console.error('resident instance lists ALL of them, live-streaming included.');
+      return 1;
     }
+    if (!process.env.DEEPSEEK_API_KEY) {
+      console.warn("warning: DEEPSEEK_API_KEY is not set in THIS shell. The resident instance inherits this shell's environment, so the phone will report 'no api key configured'. Start the service from a shell where the key is set (machine-level environment variables are inherited automatically).");
+    }
+    const authorities = await computeAuthorities(config);
+    const result = service.startService({ config, authorities, logPath });
+    if (!result.started) {
+      console.log(result.alreadyRunning ? `service already running (pid ${result.pid})` : `service failed to start: ${result.error ?? "unknown error"}`);
+      return result.alreadyRunning ? 0 : 1;
+    }
+    console.log(`service started (pid ${result.pid})`);
+    console.log(`  logs : ${logPath}`);
+    console.log(`  web  : ${await mobileUrl(config)}`);
+    console.log("pair your phone: dsh --profile mobile device pair --name <name>");
+    return 0;
+  }
+
+  switch (action) {
+    case "start":
+      return await startGuarded();
     case "stop": {
       const result = service.stopService({ config });
       if (result.error) {
@@ -199,10 +184,7 @@ async function cmdService(args) {
         console.error(`refusing to restart: ${stopped.error}`);
         return 1;
       }
-      const authorities = await computeAuthorities(config);
-      const started = service.startService({ config, authorities, logPath });
-      console.log(`service restarted (pid ${started.pid})`);
-      return 0;
+      return await startGuarded();
     }
     case "status": {
       const s = service.serviceStatus({ config });
@@ -439,66 +421,6 @@ async function cmdDoctor() {
   return worst;
 }
 
-async function cmdAttach() {
-  // One-instance mode: the resident instance becomes THE primary dsh web
-  // (port 3080). All flags/env are handled by the launcher — nothing to
-  // configure by hand.
-  const portCheck = await checkPortFree(3080);
-  if (!portCheck.free) {
-    console.error('port 3080 is in use by your other dsh web. Stop that instance first, then re-run:');
-    console.error('  dsh --profile mobile attach');
-    console.error('');
-    console.error('Nothing is lost: sessions live on disk under $DSH_HOME/sessions and the');
-    console.error('resident instance lists ALL of them (live-streaming included).');
-    return 1;
-  }
-
-  let config = mustConfig();
-  if (config.webPort !== 3080) {
-    writeAttachState({ previousWebPort: config.webPort, attachedAt: Date.now() });
-    config = setConfigValue(config, 'webPort', 3080);
-    saveConfig(config);
-    console.log('webPort set to 3080 (one-instance mode)');
-  }
-  const { config: fresh } = loadConfig();
-
-  // stop any resident instance running on another port, then start on 3080
-  const stopped = service.stopService({ config: fresh });
-  if (stopped.error) {
-    console.error(`refusing to restart: ${stopped.error}`);
-    return 1;
-  }
-  ensureMobileDirs();
-  const authorities = await computeAuthorities(fresh);
-  const started = service.startService({ config: fresh, authorities, logPath: join(logsDir(), 'service.log') });
-  if (!started.started) fail(started.error ?? 'failed to start');
-
-  console.log('one-instance mode active — this machine now has ONE dsh web:');
-  console.log('  local : http://127.0.0.1:3080/');
-  console.log(`  remote: ${await mobileUrl(fresh)}`);
-  console.log('pair once on the phone; every session (past and live) is right there.');
-  return 0;
-}
-
-async function cmdDetach() {
-  // Exit one-instance mode: stop the resident instance (frees 3080) and
-  // restore the pre-attach webPort so the old launcher can take the port back.
-  const config = mustConfig();
-  const stopped = service.stopService({ config });
-  if (stopped.error) {
-    console.error(`refusing to stop: ${stopped.error}`);
-    return 1;
-  }
-  const state = readAttachState();
-  if (state?.previousWebPort && state.previousWebPort !== config.webPort) {
-    saveConfig(setConfigValue(loadConfig().config, 'webPort', state.previousWebPort));
-    console.log(`webPort restored to ${state.previousWebPort}`);
-  }
-  clearAttachState();
-  console.log('detached — port 3080 is free again; you can relaunch your other dsh web.');
-  return 0;
-}
-
 async function cmdUpdate() {
   let code = 0;
   for (const profile of ["mobile", "web"]) {
@@ -525,8 +447,6 @@ const COMMANDS = {
   config: cmdConfig,
   doctor: cmdDoctor,
   update: cmdUpdate,
-  attach: cmdAttach,
-  detach: cmdDetach,
 };
 
 export async function runCommand(name, args, options) {

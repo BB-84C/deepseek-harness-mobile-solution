@@ -43,43 +43,27 @@ frontend, the key never travels to it.
 - `.env` files also work: dsh's own layered env loads
   `<invoking-directory>/.env` then `$DSH_HOME/.env` at launch.
 
-## One instance, one registry — the attach mode
+## One instance, one registry
 
 dsh persists sessions as **single-writer logs**. Two dsh web processes on the
 same machine keep separate session registries, and resuming a session that
 another live process is writing races its writer — the failure mode looks
 like `corrupt session log: seq gap in committed region`. The fix is the
 one-instance principle: **the phone must reach the instance that owns the
-sessions.**
+sessions** — and `service start` enforces it for you:
 
-If you already run a primary dsh web (your daily driver), make the resident
-instance BE it — one command, nothing to configure:
+- **Port free** (the normal case): the resident instance starts on
+  `webPort` (default 3080) and becomes the machine's single dsh web. Local
+  usage is unchanged (`http://127.0.0.1:3080/`); the phone live-streams every
+  session — past and running — from that one instance.
+- **Port occupied by another process** (your old dsh web): `service start`
+  **refuses with exact instructions** — stop that instance, then re-run the
+  same command. Nothing is touched and nothing is lost: sessions live on disk
+  under `$DSH_HOME/sessions` and the resident instance lists all of them.
 
-```sh
-# stop your old dsh web (it occupies 3080), then:
-dsh --profile mobile attach
-```
-
-`attach` sets `webPort` to 3080, starts the resident instance there, and
-prints the local + remote URLs. Everything — past sessions, live sessions,
-streaming, the gateway — is now in the one instance that owns the session
-logs. Your local workflow does not change (same `http://127.0.0.1:3080/`);
-the phone URL is unchanged.
-
-If 3080 is still occupied, `attach` refuses with a clear message and nothing
-else is touched; stop the old instance and re-run.
-
-`attach` never leaves orphans: the instance it starts on 3080 is the same
-tracked resident instance (pidfile + sidecar), so `service stop` always works
-on it. To hand the port back to your old launcher, use the symmetric exit:
-
-```sh
-dsh --profile mobile detach     # stops the instance, frees 3080, restores webPort
-```
-
-The resident-service model (`service start`) remains the right choice when the
-machine has NO other dsh web: the resident instance is then the single owner
-of all sessions and the phone streams them live from the first prompt.
+That is the whole model — one command, no "attach" step, no flags. To hand
+the machine back to a different launcher later, `service stop` frees the port
+(it is a tracked resident instance: pidfile + sidecar, kill-safe, no orphans).
 
 ## Start on login (optional)
 

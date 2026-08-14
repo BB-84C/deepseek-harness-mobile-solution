@@ -90,18 +90,6 @@ const SUBCOMMANDS = [
     argsDesc: "",
     options: [],
   },
-  {
-    name: "attach",
-    description: "one-instance mode: make the resident dsh web your primary instance on 3080 (one command, no flags to configure)",
-    argsDesc: "",
-    options: [],
-  },
-  {
-    name: "detach",
-    description: "exit one-instance mode: stop the resident instance, free 3080, restore the previous webPort",
-    argsDesc: "",
-    options: [],
-  },
 ];
 
 /**

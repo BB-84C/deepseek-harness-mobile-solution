@@ -9,9 +9,7 @@ the **host**; the phone is only a frontend.
 | --- | --- |
 | `install` | Install/repair the plugins into the `mobile` + `web` profiles (idempotent) |
 | `uninstall` | Remove the plugins from both profiles (keeps your data) |
-| `attach` | **One-instance mode**: make the resident dsh web your primary instance on 3080 — one command, no flags |
-| `detach` | Exit one-instance mode: stop the resident instance, free 3080, restore the previous webPort |
-| `service start\|stop\|restart\|status\|logs [n]` | Manage the resident dsh web (detached, kill-safe: never touches non-mobile dsh) |
+| `service start\|stop\|restart\|status\|logs [n]` | Manage the machine's single dsh web (detached, kill-safe, one-instance guard) |
 | `tailscale status\|ip\|connect\|ping [host]` | Tailscale transport: state, address, up, reachability |
 | `tailscale serve status\|on\|off` | HTTPS on your MagicDNS name (Let's Encrypt cert via Tailscale) |
 | `relay connect <url> --token <t> [--id] [--name]` | Register this machine with your VPS relay (fan-in) |
@@ -27,7 +25,7 @@ the **host**; the phone is only a frontend.
 
 | Port | Role | Notes |
 | --- | --- | --- |
-| `3080` | official dsh web, loopback only | the same port as a normal dsh web; `attach` puts the resident instance here |
+| `3080` | official dsh web, loopback only | the standard dsh web port; the resident instance binds it by default |
 | `3081` | mobile gateway (device auth + proxy) | binds the tailnet address; `tailscale serve` forwards 443 → 127.0.0.1:3081, so the phone sees only `https://<your-node>.ts.net/` |
 | `443` (tailnet) | HTTPS entry via `tailscale serve` | certificate issued and renewed by Tailscale |
 
@@ -56,13 +54,17 @@ the **host**; the phone is only a frontend.
 
 dsh session logs are single-writer. Never run two dsh web processes against
 the same `$DSH_HOME` and resume the same sessions from both — that races the
-writer and corrupts logs (`seq gap in committed region`). Either:
+writer and corrupts logs (`seq gap in committed region`). There is exactly one
+command to know:
 
-- **`attach`** (recommended when you already have a daily-driver dsh web):
-  stop the old one, run `dsh --profile mobile attach`, done. One instance
-  owns everything; the phone live-streams all of it.
-- **`service start`** alone (machines with no other dsh web): the resident
-  instance is the single owner from day one.
+- **`service start`** makes the machine's single dsh web. If the configured
+  port (default 3080) is free, the resident instance starts there — local
+  usage is unchanged (`http://127.0.0.1:3080/`) and the phone live-streams
+  every session, past and running, from that one instance.
+- If the port is occupied by a process that is NOT the tracked resident
+  instance (your old dsh web), `service start` **refuses with exact
+  instructions**: stop that instance, re-run the same command. Nothing is
+  touched; nothing is lost (sessions live on disk under `$DSH_HOME/sessions`).
 
 ## Multi-machine (relay fan-in)
 
