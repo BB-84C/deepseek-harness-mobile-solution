@@ -200,12 +200,13 @@ update                        升级两个插件（转发 dsh plugin update）�
 | M6 | 移动 UI/UX specs | mobile-web / mobile-app（Android+iOS）specs（交其他 agent） | ⬜ |
 | M7 | 端到端验收 | 本机 tailscale P2P 实测 + relay 模拟实测；README 完善；发布前检查 | ⬜ |
 
-当前进度：M1 完成（本机 E2E：`dsh --profile mobile doctor/status/tailscale status/config set/service start`
-全部实测通过；`service stop` 在无侧车文件时按设计拒绝杀进程，防误杀红线验证 ✅）。
-M2 进行中：gateway（认证+反代）由 subagent 实现；M3 relay 原型在修 bug（targets online 标志、
-POST body 路径 socket 中断）。关键集成发现：pnpm 对 Windows 绝对路径 link:/file: 解析有 bug，
-installer 采用 profile 内 vendor-packages junction + 相对 spec + 自建 node_modules 链接（见 §2-7、
-scripts/install-mobile.mjs）。
+当前进度：M1 ✅（本机 E2E：doctor/status/tailscale/config/service 全实测；stop 防误杀红线验证）。
+M2 收尾中：gateway 已交付（846 行：认证/反代/SSE/WS/配对/侧车/审计），待与 specs 对齐两处契约
+（POST /mobile/pair 的 JSON 形态、/mobile/api/status 响应形状）后全链路验收。
+M3 ✅（relay 22/22 + tunnel 7/7 + relay↔tunnel E2E；协议 v2：gateway 是唯一认证边界）。
+M4 部分完成（常量时间比较已入 relay tokens + device store）；passkey（relay owner WebAuthn）待实现。
+M5 ✅ 文档/脚本/自启模板交付（91/91 全仓测试绿；relay 二进制冒烟通过）。
+M6 ✅ specs 交付（mobile-web 10 节 + mobile-app 9 节，含官方 /api 契约快照与发现程序）。
 
 ## 5. 仓库布局
 
