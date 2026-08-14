@@ -528,6 +528,7 @@ export function createGateway(deps = {}) {
   }
 
   function authErrorText(key) {
+    if (!key) return '';
     if (key === 'pair') return 'Invalid or expired pairing code.';
     if (key === 'missing') return 'A pairing code is required.';
     return 'Sign in failed.';

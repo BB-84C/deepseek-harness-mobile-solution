@@ -134,6 +134,19 @@ test('unauthenticated navigation redirects to the auth gate', async () => {
   assert.ok(res.headers.location.startsWith('/mobile/auth?next='));
 });
 
+test('fresh auth page shows no error line (no error param)', async () => {
+  const res = await request('/mobile/auth');
+  assert.strictEqual(res.status, 200);
+  const body = res.text();
+  assert.ok(!body.includes('Sign in failed.'));
+  assert.ok(!body.includes('class="error"'));
+});
+
+test('auth page maps error params to messages', async () => {
+  const res = await request('/mobile/auth?error=pair');
+  assert.ok(res.text().includes('Invalid or expired pairing code.'));
+});
+
 test('unauthenticated /api returns 401 JSON', async () => {
   const res = await request('/api/x', { headers: { accept: 'application/json' } });
   assert.strictEqual(res.status, 401);

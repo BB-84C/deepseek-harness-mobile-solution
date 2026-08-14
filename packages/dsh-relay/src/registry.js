@@ -93,18 +93,22 @@ export class Registry {
     const inst = this.instances.get(id)
     if (!inst) return { error: 'instance-offline' }
     if (inst.streams.size >= this.maxStreams) return { error: 'stream-limit' }
-    let timer = setTimeout(() => {
+    // Capture the registry's idle timeout up front: the stream object returned
+    // below has no `idleTimeoutMs` of its own, and `this.idleTimeoutMs` inside
+    // reset() would be undefined — setTimeout(fn, undefined) fires on the very
+    // next tick, killing every response whose frames arrive across ticks
+    // (i.e. every real-world response through a proxy).
+    const idleMs = this.idleTimeoutMs
+    const onTimeout = () => {
       inst.streams.delete(streamId)
       if (typeof onIdle === 'function') onIdle()
-    }, this.idleTimeoutMs)
+    }
+    let timer = setTimeout(onTimeout, idleMs)
     if (timer.unref) timer.unref()
     const stream = {
       reset() {
         clearTimeout(timer)
-        timer = setTimeout(() => {
-          inst.streams.delete(streamId)
-          if (typeof onIdle === 'function') onIdle()
-        }, this.idleTimeoutMs)
+        timer = setTimeout(onTimeout, idleMs)
         if (timer.unref) timer.unref()
       },
       clear() {

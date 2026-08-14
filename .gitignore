@@ -26,8 +26,11 @@ Thumbs.db
 *.key
 
 # Local E2E test artifacts
+.m7/
 .m7-*
 .relay-*
+.repro-*
+.t.out
 *.out
 
 # Session-log corruption forensics (2026-08-14 incident, machine-specific)

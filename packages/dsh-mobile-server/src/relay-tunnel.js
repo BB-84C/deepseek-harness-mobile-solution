@@ -105,6 +105,13 @@ export function createTunnelClient(deps = {}) {
         headers,
         body,
         signal: controller.signal,
+        // The tunnel is a TRANSPARENT proxy: 3xx responses (e.g. the gateway's
+        // /mobile/auth redirect with its Set-Cookie) must reach the client
+        // verbatim. Fetch's default `follow` would consume the redirect
+        // internally and swallow the intermediate Set-Cookie, so a browser
+        // pairing POST would end up displaying the follow-up page as the
+        // POST's own response with the session cookie lost.
+        redirect: 'manual',
       });
       const resHeaders = {};
       if (response.headers) {
@@ -171,17 +178,20 @@ export function createTunnelClient(deps = {}) {
         handleReq(frame).catch(() => {});
       }
     });
-    ws.addEventListener('close', () => {
+    ws.addEventListener('close', (event) => {
       const wasConnected = connectedSince !== null;
       connectedSince = null;
       abortAll();
       status(false, 'connection closed');
-      if (wasConnected) log.log('[relay-tunnel] disconnected');
+      const code = event && typeof event.code === 'number' ? event.code : '?';
+      const reason = event && event.reason ? String(event.reason) : '';
+      log.log(`[relay-tunnel] disconnected (code=${code} reason=${JSON.stringify(reason)})`);
       scheduleReconnect('connection closed');
     });
-    ws.addEventListener('error', () => {
+    ws.addEventListener('error', (event) => {
       // close follows; nothing to do here beyond a log line
-      log.error('[relay-tunnel] websocket error');
+      const err = event && (event.error || event.message);
+      log.error(`[relay-tunnel] websocket error: ${err ? String(err.message ?? err) : 'unknown'}`);
     });
   }
 

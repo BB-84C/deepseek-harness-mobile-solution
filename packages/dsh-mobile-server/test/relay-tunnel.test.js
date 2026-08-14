@@ -104,6 +104,41 @@ test('req frame is served against the local gateway and answered with res/chunk/
   handle.stop();
 });
 
+test('redirects are NOT followed: 3xx + set-cookie pass through verbatim', async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    return new Response('', {
+      status: 302,
+      headers: {
+        location: '/mobile/auth?next=%2F',
+        'set-cookie': 'dsh_mobile_sid=abc123; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000',
+      },
+    });
+  };
+  const deps = makeDeps({ fetchImpl });
+  const client = createTunnelClient({ ...deps, wsCtor: MockWebSocket });
+  const handle = client.start();
+  const ws = MockWebSocket.instances[0];
+  ws._open();
+
+  ws.emit('message', { data: JSON.stringify({ v: 1, t: 'req', id: 9, method: 'POST', url: '/mobile/auth', headers: {} }) });
+  await new Promise((r) => setTimeout(r, 20));
+
+  // the tunnel must ask for manual redirects — fetch's default `follow`
+  // would consume the 302 and swallow the session cookie
+  assert.strictEqual(calls[0].init.redirect, 'manual');
+
+  const sent = frames(ws);
+  const res = sent.find((f) => f.t === 'res');
+  assert.strictEqual(res.status, 302);
+  assert.strictEqual(res.headers.location, '/mobile/auth?next=%2F');
+  assert.strictEqual(res.headers['set-cookie'], 'dsh_mobile_sid=abc123; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000');
+  assert.deepStrictEqual(sent.map((f) => f.t), ['res', 'end']);
+
+  handle.stop();
+});
+
 test('hop-by-hop response headers are stripped from res frames', async () => {
   const fetchImpl = async () =>
     new Response('x', { status: 200, headers: { 'content-type': 'text/plain', 'transfer-encoding': 'chunked', 'content-length': '1', 'connection': 'close' } });

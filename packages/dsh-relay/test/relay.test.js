@@ -455,6 +455,39 @@ describe('relay integration', () => {
     }
   })
 
+  test('split-tick res/chunk/end frames survive the idle timer (regression)', async () => {
+    const u = new URL(wsBase)
+    u.pathname = '/relay/instance-tunnel'
+    u.search = `?instanceToken=${encodeURIComponent(instanceToken)}&id=${encodeURIComponent(instanceId)}&name=my-instance`
+    const ws = await connect(u.toString())
+    try {
+      await waitFor(() => relay.registry.get(instanceId) !== null)
+      ws.on('message', (data, isBinary) => {
+        if (isBinary) return
+        const msg = JSON.parse(data.toString())
+        if (msg && msg.v === 1 && msg.t === 'req') {
+          ws.sendText(JSON.stringify({ v: 1, t: 'res', id: msg.id, status: 200, headers: { 'content-type': 'text/plain' } }))
+          // chunk + end arrive in a LATER tick — a broken idle timer (0 ms
+          // re-arm) destroys the response in between and the client gets
+          // nothing
+          setTimeout(() => {
+            ws.sendText(JSON.stringify({ v: 1, t: 'chunk', id: msg.id, bodyBase64: Buffer.from('late body').toString('base64') }))
+            ws.sendText(JSON.stringify({ v: 1, t: 'end', id: msg.id }))
+          }, 40)
+        }
+      })
+      const res = await request(base, '/instance/' + instanceId + '/slow', { method: 'GET', headers: { host: 'relay.example.com' } })
+      assert.strictEqual(res.status, 200)
+      assert.strictEqual(res.text(), 'late body')
+    } finally {
+      try {
+        ws.close()
+      } catch {
+        /* ignore */
+      }
+    }
+  })
+
   test('cookie routing on the public host forwards root paths to the selected instance', async () => {
     const inst = await createFakeInstance({
       url: wsBase, token: instanceToken, id: instanceId, name: 'my-instance',

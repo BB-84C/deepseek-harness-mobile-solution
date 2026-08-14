@@ -7,6 +7,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import os from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureMobileDirs, logsDir, resolveMobileHome } from "@bb-84c/dsh-mobile-common/home.js";
@@ -311,15 +312,22 @@ async function cmdRelay(args, options) {
       if (!relayUrl) fail("connect needs the relay URL: dsh --profile mobile relay connect wss://relay.example.com --token <t>");
       if (!options.token) fail("connect needs --token <instance-token> (issued by the relay owner)");
       const normalized = relayUrl.replace(/^wss?:\/\//, "https://").replace(/\/+$/, "");
+      // Default instance id: sanitized tailscale hostname (or OS hostname) so
+      // the instance entry /instance/<id>/ and pairing deep links are stable.
+      const defaultId = String(tailscale.tailscaleHostname() || os.hostname() || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9-]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 64) || "dsh";
       config.mode = "relay";
       config.relay = {
         url: normalized,
         instanceToken: options.token,
-        instanceId: options.id ?? "",
+        instanceId: options.id ?? defaultId,
         displayName: options.name ?? "",
       };
       saveConfig(config);
-      console.log(`relay configured: ${normalized}`);
+      console.log(`relay configured: ${normalized} (instance ${config.relay.instanceId})`);
       console.log("apply it: dsh --profile mobile relay start");
       return 0;
     }

@@ -897,10 +897,19 @@ export function createRelayServer(options = {}) {
     const ws = new WSSocket(socket, { requireMasked: true, maskOutgoing: false })
     const inst = registry.register(id, name, ws, entry.hash)
     ws.on('message', (data, isBinary) => {
+      // Ignore frames from a replaced (stale) tunnel socket.
+      if (registry.get(id)?.socket !== ws) return
       registry.touch(id)
       handleInstanceMessage(id, data, isBinary)
     })
-    ws.on('close', () => {
+    ws.on('close', (code, reason) => {
+      console.log(`[dsh-relay] tunnel close id=${id} code=${code} reason=${JSON.stringify(reason)}`)
+      // Guard against a delayed close event from a replaced tunnel: skip only
+      // when a DIFFERENT socket already owns the id (the new tunnel is live
+      // and its in-flight streams must not be killed). When the id is already
+      // unregistered (e.g. token revocation), still abort its in-flight streams.
+      const current = registry.get(id)
+      if (current && current.socket !== ws) return
       registry.unregister(id)
       failPending(id)
     })
@@ -909,11 +918,20 @@ export function createRelayServer(options = {}) {
   }
 
   const httpServer = http.createServer((req, res) => {
-    handleRequest(req, res).catch(() => {
+    handleRequest(req, res).catch((err) => {
+      // A rejected handler must never leave the client with an empty reply
+      // (proxies upstream translate that into 502). Log the real cause and
+      // answer with a 500 when nothing has been written yet.
+      console.error('[dsh-relay] request failed:', err?.stack || err)
       try {
-        res.destroy()
+        if (!res.headersSent) sendJson(res, 500, { error: 'internal-error' })
+        else res.destroy()
       } catch {
-        /* ignore */
+        try {
+          res.destroy()
+        } catch {
+          /* ignore */
+        }
       }
     })
   })
