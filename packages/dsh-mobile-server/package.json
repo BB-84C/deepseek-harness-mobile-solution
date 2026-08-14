@@ -10,11 +10,13 @@
   },
   "exports": {
     "./startup": "./src/startup.js",
+    "./session-hydrate": "./src/session-hydrate.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
     "src/startup.js",
+    "src/session-hydrate.js",
     "src/gateway.js",
     "src/relay-tunnel.js",
     "cordis.patch.yml"

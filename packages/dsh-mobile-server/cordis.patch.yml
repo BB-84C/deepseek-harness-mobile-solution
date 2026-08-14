@@ -6,6 +6,14 @@
     - id: mobile-gateway
       name: '@bb-84c/dsh-mobile-server/startup'
 
+    # Resident "session sync": enumerate persisted sessions under the shared
+    # $DSH_HOME/sessions root and cold-validate/hydrate them into view. Inert
+    # unless DSH_MOBILE_INSTANCE=1 (same gate as the gateway). Safe default is
+    # enumerate + validate + pre-warm; see src/session-hydrate.js header for the
+    # opt-in attach mode (DSH_MOBILE_SESSION_ATTACH=1) and its resume risk.
+    - id: mobile-session-hydrate
+      name: '@bb-84c/dsh-mobile-server/session-hydrate'
+
 # Remote browsers cannot show the host-native directory dialog (it appears on
 # the dsh machine, not the phone). Pin the browser-based directory picker:
 # disable the auto row (which resolves to native for a loopback-bound web) and
