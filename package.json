@@ -1,0 +1,12 @@
+{
+  "name": "deepseek-harness-mobile-solution",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Remotely control a locally resident DeepSeek Harness (dsh) instance from any device — Tailscale point-to-point or a self-hosted VPS relay — with the official dsh Web UI/UX. dsh plugins only.",
+  "type": "module",
+  "license": "MIT",
+  "packageManager": "pnpm@10.12.4",
+  "scripts": {
+    "test": "node --test packages/*/test packages/dsh-relay/test"
+  }
+}

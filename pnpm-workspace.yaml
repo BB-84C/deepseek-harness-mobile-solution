@@ -1,0 +1,10 @@
+packages:
+  - "packages/*"
+  - "packages/dev/*"
+
+# hoisted: the dsh-mobile plugin packages are installed into dsh profiles via
+# junction + relative link: specs; Node resolves their imports from their real
+# directories (repo checkout), so dependencies must be reachable by walking up
+# from packages/ — a hoisted repo-root node_modules provides exactly that.
+nodeLinker: hoisted
+autoInstallPeers: false

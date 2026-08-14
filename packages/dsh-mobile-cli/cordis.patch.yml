@@ -1,0 +1,9 @@
+# The dsh-mobile-cli bundle patch: the `dsh --profile mobile` control plane
+# over the dsh-base layer. Composed only into the `mobile` profile.
+#
+# One row: the command-line plugin. It owns the whole command line the
+# launcher hands to this profile (see src/startup.js), executes the invoked
+# command, and exits through appExit.
+- insert:
+    - id: mobile-startup
+      name: '@bb-84c/dsh-mobile-cli/startup'
