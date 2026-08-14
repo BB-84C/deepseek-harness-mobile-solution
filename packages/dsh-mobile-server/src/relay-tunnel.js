@@ -12,6 +12,7 @@
  */
 
 import os from 'node:os';
+import net from 'node:net';
 import { loadConfig } from '@bb-84c/dsh-mobile-common/config.js';
 import { writeRelayStatus } from '@bb-84c/dsh-mobile-common/relay-status.js';
 
@@ -63,6 +64,7 @@ export function createTunnelClient(deps = {}) {
   if (!targetPort) throw new Error('targetPort is required');
 
   const inflight = new Map();
+  const wsStreams = new Map(); // streamId -> raw socket to the gateway (WS upgrades)
   let ws = null;
   let stopped = false;
   let reconnectTimer = null;
@@ -84,6 +86,45 @@ export function createTunnelClient(deps = {}) {
 
   function send(frame) {
     if (ws && ws.readyState === 1 /* OPEN */) ws.send(JSON.stringify(frame));
+  }
+
+  /**
+   * Serve a tunneled WebSocket upgrade: connect a RAW socket to the local
+   * gateway, replay the client's upgrade request verbatim (the 101 response
+   * bytes flow back through wdata frames to the client browser), then pipe
+   * bytes in both directions. The relay is a byte pipe; the real handshake
+   * happens between the browser and the dsh web app.
+   */
+  function handleWsReq(frame) {
+    const id = frame.id;
+    let socket;
+    try {
+      socket = net.connect(targetPort, '127.0.0.1');
+    } catch (error) {
+      send({ v: 1, t: 'wend', id });
+      return;
+    }
+    wsStreams.set(id, { socket });
+
+    socket.setNoDelay(true);
+    socket.on('connect', () => {
+      const lines = [`${frame.method ?? 'GET'} ${frame.url ?? '/'} HTTP/1.1`];
+      for (const [key, value] of Object.entries(frame.headers ?? {})) {
+        lines.push(`${key}: ${Array.isArray(value) ? value.join(', ') : value}`);
+      }
+      const head = frame.headBase64 ? Buffer.from(frame.headBase64, 'base64') : Buffer.alloc(0);
+      socket.write(`${lines.join('\r\n')}\r\n\r\n`);
+      if (head.length) socket.write(head);
+    });
+    socket.on('data', (chunk) => {
+      send({ v: 1, t: 'wdata', id, bodyBase64: chunk.toString('base64') });
+    });
+    socket.on('error', () => {
+      if (wsStreams.delete(id)) send({ v: 1, t: 'wend', id });
+    });
+    socket.on('close', () => {
+      if (wsStreams.delete(id)) send({ v: 1, t: 'wend', id });
+    });
   }
 
   async function handleReq(frame) {
@@ -174,8 +215,28 @@ export function createTunnelClient(deps = {}) {
       } catch {
         return; // ignore malformed frames
       }
-      if (frame && frame.v === 1 && frame.t === 'req' && Number.isInteger(frame.id)) {
+      if (!frame || frame.v !== 1 || !Number.isInteger(frame.id)) return;
+      if (frame.t === 'req') {
         handleReq(frame).catch(() => {});
+      } else if (frame.t === 'wreq') {
+        handleWsReq(frame);
+      } else if (frame.t === 'wdata') {
+        const entry = wsStreams.get(frame.id);
+        if (!entry) return;
+        try {
+          if (frame.bodyBase64) entry.socket.write(Buffer.from(frame.bodyBase64, 'base64'));
+        } catch {
+          /* socket gone */
+        }
+      } else if (frame.t === 'wend') {
+        const entry = wsStreams.get(frame.id);
+        if (!entry) return;
+        wsStreams.delete(frame.id);
+        try {
+          entry.socket.destroy();
+        } catch {
+          /* already closed */
+        }
       }
     });
     ws.addEventListener('close', (event) => {
@@ -204,6 +265,14 @@ export function createTunnelClient(deps = {}) {
       }
     }
     inflight.clear();
+    for (const entry of wsStreams.values()) {
+      try {
+        entry.socket.destroy();
+      } catch {
+        /* ignore */
+      }
+    }
+    wsStreams.clear();
   }
 
   function scheduleReconnect(reason) {

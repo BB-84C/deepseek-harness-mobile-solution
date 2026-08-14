@@ -488,6 +488,60 @@ describe('relay integration', () => {
     }
   })
 
+  test('client WebSocket upgrades are forwarded through the tunnel (byte pipe)', async () => {
+    const inst = await createFakeInstance({
+      url: wsBase, token: instanceToken, id: instanceId, name: 'ws-inst',
+    })
+    try {
+      await waitFor(() => relay.registry.get(instanceId) !== null)
+      const received = await new Promise((resolve, reject) => {
+        const u = new URL(base)
+        const socket = net.connect(Number(u.port), '127.0.0.1')
+        const chunks = []
+        const timer = setTimeout(() => {
+          socket.destroy()
+          reject(new Error('ws forward timeout'))
+        }, 5000)
+        socket.on('connect', () => {
+          socket.write([
+            'GET /api/events.mux HTTP/1.1',
+            'Host: relay.example.com',
+            'Upgrade: websocket',
+            'Connection: Upgrade',
+            'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+            'Sec-WebSocket-Version: 13',
+            'Cookie: dsh_instance=' + instanceId,
+            '',
+            '',
+          ].join('\r\n'))
+        })
+        socket.on('data', (c) => {
+          chunks.push(c)
+          const total = Buffer.concat(chunks)
+          if (total.includes('101 Switching Protocols') && !socket.forwardProbe) {
+            socket.forwardProbe = true
+            socket.write(Buffer.from('ping-bytes'))
+          }
+          if (total.includes('ping-bytes')) {
+            clearTimeout(timer)
+            socket.destroy()
+            resolve(total)
+          }
+        })
+        socket.on('error', (err) => {
+          clearTimeout(timer)
+          reject(err)
+        })
+      })
+      // the real 101 handshake bytes come from the instance side
+      assert.ok(received.includes('HTTP/1.1 101 Switching Protocols'))
+      // and raw bytes round-trip both ways
+      assert.ok(received.includes('ping-bytes'))
+    } finally {
+      inst.close()
+    }
+  })
+
   test('cookie routing on the public host forwards root paths to the selected instance', async () => {
     const inst = await createFakeInstance({
       url: wsBase, token: instanceToken, id: instanceId, name: 'my-instance',

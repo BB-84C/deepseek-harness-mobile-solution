@@ -220,6 +220,26 @@ function sanitizeHeaders(headers) {
   return out
 }
 
+// For a forwarded WebSocket upgrade the tunnel must REBUILD the handshake
+// verbatim, so `upgrade`/`connection`/`sec-websocket-*` are kept (they are
+// hop-by-hop for plain HTTP but the payload of the tunneled upgrade request).
+function sanitizeUpgradeHeaders(headers) {
+  const out = {}
+  for (const [k, v] of Object.entries(headers)) {
+    const lk = k.toLowerCase()
+    if (lk.startsWith('x-relay-')) continue
+    if (HOP_BY_HOP.has(lk) && lk !== 'upgrade' && lk !== 'connection') continue
+    if (Array.isArray(v)) out[k] = v.join(', ')
+    else if (v != null) out[k] = String(v)
+  }
+  if (out.cookie !== undefined) {
+    const stripped = stripRelayCookies(out.cookie)
+    if (stripped) out.cookie = stripped
+    else delete out.cookie
+  }
+  return out
+}
+
 // --- Server factory ---------------------------------------------------------
 
 export function createRelayServer(options = {}) {
@@ -250,6 +270,7 @@ export function createRelayServer(options = {}) {
   const sessions = new Map() // sessionId -> expiry epoch ms
   const challenges = new Map() // WebAuthn challenge (b64url) -> expiry epoch ms
   const pendingMap = new Map() // streamId -> pending request record
+  const wsPending = new Map() // streamId -> { instanceId, socket } (tunneled WebSocket upgrades)
   const clientRequests = new Map() // token hash -> Set<streamId>
   const rateLimiter = new RateLimiter(opts.rateLimitPerMin)
   let streamSeq = 0
@@ -503,6 +524,31 @@ export function createRelayServer(options = {}) {
       return
     }
     if (!msg || msg.v !== 1 || typeof msg.id !== 'number') return
+
+    // Tunneled WebSocket frames live in wsPending, not pendingMap — route them
+    // before the HTTP-stream lookup below.
+    if (msg.t === 'wdata') {
+      const w = wsPending.get(msg.id)
+      if (!w || w.instanceId !== instanceId) return
+      try {
+        if (msg.bodyBase64) w.socket.write(Buffer.from(msg.bodyBase64, 'base64'))
+      } catch {
+        /* socket gone */
+      }
+      return
+    }
+    if (msg.t === 'wend') {
+      const w = wsPending.get(msg.id)
+      if (!w || w.instanceId !== instanceId) return
+      wsPending.delete(msg.id)
+      try {
+        w.socket.destroy()
+      } catch {
+        /* already closed */
+      }
+      return
+    }
+
     const p = pendingMap.get(msg.id)
     if (!p || p.instanceId !== instanceId) return
 
@@ -602,6 +648,65 @@ export function createRelayServer(options = {}) {
     if (!inst.socket.sendText(JSON.stringify(frame))) {
       cleanupPending(streamId)
       return sendJson(res, 502, { error: 'instance-offline' })
+    }
+  }
+
+  /**
+   * Tunneled WebSocket upgrade. The relay does NOT speak RFC 6455 here — it
+   * forwards the client's upgrade request to the instance (wreq), then pipes
+   * raw bytes both ways (wdata/wend). The real handshake happens between the
+   * client browser and the instance's dsh web app; the relay is a byte pipe.
+   */
+  function handleClientUpgrade(req, socket, head, id, forwardUrl) {
+    const inst = registry.get(id)
+    if (!inst) return rejectUpgrade(socket, 502, 'Bad Gateway')
+
+    const streamId = ++streamSeq
+    const headers = sanitizeUpgradeHeaders(req.headers)
+    const frame = {
+      v: 1,
+      t: 'wreq',
+      id: streamId,
+      method: req.method,
+      url: forwardUrl,
+      headers,
+    }
+    if (head && head.length) frame.headBase64 = head.toString('base64')
+
+    if (!inst.socket.sendText(JSON.stringify(frame))) {
+      return rejectUpgrade(socket, 502, 'Bad Gateway')
+    }
+    wsPending.set(streamId, { instanceId: id, socket })
+
+    socket.setNoDelay(true)
+    socket.on('data', (chunk) => {
+      if (!wsPending.has(streamId)) return
+      if (registry.get(id)?.socket === inst.socket) {
+        inst.socket.sendText(JSON.stringify({ v: 1, t: 'wdata', id: streamId, bodyBase64: chunk.toString('base64') }))
+      }
+    })
+    socket.on('error', () => {
+      if (wsPending.delete(streamId)) {
+        inst.socket.sendText(JSON.stringify({ v: 1, t: 'wend', id: streamId }))
+      }
+    })
+    socket.on('close', () => {
+      if (wsPending.delete(streamId)) {
+        inst.socket.sendText(JSON.stringify({ v: 1, t: 'wend', id: streamId }))
+      }
+    })
+  }
+
+  /** Abort every tunneled WS stream of an instance (tunnel died / revoked). */
+  function failWsStreams(instanceId) {
+    for (const [streamId, w] of [...wsPending.entries()]) {
+      if (w.instanceId !== instanceId) continue
+      wsPending.delete(streamId)
+      try {
+        w.socket.destroy()
+      } catch {
+        /* already closed */
+      }
     }
   }
 
@@ -865,7 +970,30 @@ export function createRelayServer(options = {}) {
     } catch {
       return rejectUpgrade(socket, 400, 'Bad Request')
     }
-    if (u.pathname !== '/relay/instance-tunnel') {
+    const pathname = u.pathname
+
+    // Client WebSocket upgrades are forwarded through the tunnel (byte pipe);
+    // the instance's dsh web app performs the real handshake.
+    if (pathname !== '/relay/instance-tunnel') {
+      // /instance/<id>/<path> entry
+      if (pathname.startsWith('/instance/')) {
+        const after = pathname.slice('/instance/'.length)
+        const slash = after.indexOf('/')
+        const id = decodeURIComponent(slash === -1 ? after : after.slice(0, slash))
+        if (!/^[a-z0-9-]{1,64}$/.test(id)) return rejectUpgrade(socket, 400, 'Bad Request')
+        const restPath = slash === -1 ? '/' : after.slice(slash)
+        return handleClientUpgrade(req, socket, head, id, restPath + u.search)
+      }
+      // cookie routing on the public host
+      if (opts.publicHost && typeof req.headers.host === 'string') {
+        const host = req.headers.host.split(':')[0].toLowerCase()
+        if (host === opts.publicHost.toLowerCase() && !pathname.startsWith('/relay/')) {
+          const selected = parseCookies(req)['dsh_instance'] || null
+          if (selected && /^[a-z0-9-]{1,64}$/.test(selected)) {
+            return handleClientUpgrade(req, socket, head, selected, pathname + u.search)
+          }
+        }
+      }
       return rejectUpgrade(socket, 404, 'Not Found')
     }
 
@@ -918,6 +1046,7 @@ export function createRelayServer(options = {}) {
       if (current && current.socket !== ws) return
       registry.unregister(id)
       failPending(id)
+      failWsStreams(id)
     })
     ws.on('error', () => {})
     if (head && head.length) ws.feed(head)
@@ -1046,7 +1175,26 @@ export async function createFakeInstance({ url, token, id, name, handler } = {})
     } catch {
       return
     }
-    if (!msg || msg.v !== 1 || msg.t !== 'req') return
+    if (!msg || msg.v !== 1) return
+
+    // Tunneled WebSocket upgrade: answer with a canned 101 and echo data.
+    if (msg.t === 'wreq') {
+      const handshake = [
+        'HTTP/1.1 101 Switching Protocols',
+        'Connection: Upgrade',
+        'Upgrade: websocket',
+        '',
+        '',
+      ].join('\r\n')
+      ws.sendText(JSON.stringify({ v: 1, t: 'wdata', id: msg.id, bodyBase64: Buffer.from(handshake).toString('base64') }))
+      return
+    }
+    if (msg.t === 'wdata') {
+      ws.sendText(JSON.stringify({ v: 1, t: 'wdata', id: msg.id, bodyBase64: msg.bodyBase64 ?? '' }))
+      return
+    }
+    if (msg.t === 'wend') return
+    if (msg.t !== 'req') return
     let result
     try {
       result = handler
@@ -1166,10 +1314,24 @@ function esc(s) {
   });
 }
 async function api(path, opts) {
-  const res = await fetch(path, opts);
-  let body = null;
-  try { body = await res.json(); } catch (e) {}
-  return { status: res.status, body: body };
+  try {
+    const res = await fetch(path, opts);
+    let body = null;
+    try { body = await res.json(); } catch (e) {}
+    return { status: res.status, body: body };
+  } catch (e) {
+    // relay restart / network blip: report failure instead of rejecting so
+    // the page can retry instead of staying silently empty
+    return { status: 0, body: null };
+  }
+}
+let retryTimer = null;
+function scheduleRetry() {
+  if (retryTimer !== null) return;
+  retryTimer = setTimeout(function () {
+    retryTimer = null;
+    refresh();
+  }, 5000);
 }
 async function loadTokens() {
   const res = await api('/relay/api/tokens');
@@ -1189,7 +1351,23 @@ async function loadTargets() {
   const res = await api('/relay/api/targets');
   const tbody = document.querySelector('#instances tbody');
   tbody.innerHTML = '';
+  if (res.status === 0) {
+    document.getElementById('status').textContent = 'cannot reach the relay — retrying…';
+    scheduleRetry();
+    return;
+  }
   const rows = Array.isArray(res.body) ? res.body : [];
+  if (rows.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 4;
+    td.style.color = '#8b949e';
+    td.textContent = 'no instances registered yet — on a machine, run: dsh --profile mobile relay start';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    document.getElementById('status').textContent = '';
+    return;
+  }
   for (const t of rows) {
     const tr = document.createElement('tr');
     const last = t.lastSeenMs ? new Date(t.lastSeenMs).toLocaleString() : '-';
@@ -1198,6 +1376,7 @@ async function loadTargets() {
     tr.innerHTML = '<td>' + idCell + '</td><td>' + esc(t.name) + '</td><td>' + state + '</td><td>' + last + '</td>';
     tbody.appendChild(tr);
   }
+  document.getElementById('status').textContent = '';
 }
 async function refresh() {
   const tokensRes = await api('/relay/api/tokens');
