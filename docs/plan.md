@@ -215,6 +215,10 @@ tailscale 点对点（gateway 绑 tailnet 可达、配对、官方 SPA 代理、
   (3) registry 空闲流定时器以 `undefined` 重武装（0ms 触发）→ 所有跨 tick 的大响应被立即销毁（空回复/CF 502）；
   (4) 隧道 fetch 禁止自定义 Host → Origin/Host 不一致 → 官方信任围栏对手机浏览器全部 /api 403（列表为空）。
 - restart 误报修复：守卫等待旧 resident 释放 3080 再判定外来占用；start/restart 等待 web 就绪并打印提示。
+- **实时事件通道补全**：relay 现转发客户端 WebSocket 升级（`wreq/wdata/wend` 字节管道，实例侧以原始
+  socket 对接 gateway，101 握手由浏览器与 dsh web 完成）→ 手机会话的实时流式输出实测通过。
+- **菜单服务端渲染**：实例表直接由 relay 渲染进 HTML（`__ROWS__` 占位），浏览器 JS 只做 5 秒刷新——
+  菜单不依赖客户端脚本，任何浏览器（含 JS 被禁/异常）都能看到机器列表；实例目录含在线状态与空态提示。
 剩余事项：移动 app 实现（specs 就绪）、macOS/Linux 上 CLI/常驻服务实测（浏览器访问已测）、
 多实例 fan-in 实测（第二台机器注册 relay）、relay owner passkey 注册（可选）。
 
