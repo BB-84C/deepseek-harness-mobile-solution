@@ -66,8 +66,8 @@ All tokens are stored as SHA-256 hashes; raw values are shown exactly once.
 
 ```sh
 dsh --profile mobile relay connect https://relay.example.com --token <instance-token>
-dsh --profile mobile service restart
-dsh --profile mobile relay status        # tunnel: connected since ...
+dsh --profile mobile relay start          # sets relay transport + starts the resident instance
+dsh --profile mobile relay status         # tunnel: connected since ...
 ```
 
 Each machine registers as an instance (id = machine hostname by default,
