@@ -40,6 +40,54 @@ function unique(values) {
   return [...new Set(values.filter((v) => v !== "" && v !== undefined && v !== null))];
 }
 
+/** Poll until a TCP port frees. After `restart` (or a just-finished stop) the
+ * previous resident process may still be releasing 3080 for a moment on
+ * Windows — this window must never read as a foreign occupant. */
+async function waitPortFree(port, timeoutMs = 6000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if ((await checkPortFree(port)).free) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
+/** Poll until the resident web app (3080) and the gateway answer. Announces
+ * the wait once so a slow boot is never silent for the user. */
+async function waitResidentReady(config, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  let announced = false;
+  for (;;) {
+    let web = false;
+    let gateway = false;
+    try {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 1500);
+      await fetch("http://127.0.0.1:3080/", { signal: controller.signal });
+      clearTimeout(t);
+      web = true;
+    } catch {
+      /* not yet */
+    }
+    try {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 1500);
+      const res = await fetch(`http://127.0.0.1:${config.gatewayPort}/mobile/health`, { signal: controller.signal });
+      clearTimeout(t);
+      gateway = res.ok;
+    } catch {
+      /* not yet */
+    }
+    if (web && gateway) return true;
+    if (!announced) {
+      announced = true;
+      console.log("waiting for the resident web app to boot (persisted sessions are hydrated at startup)…");
+    }
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
 /** Compute the --trusted-host authorities for the resident web instance:
  * the browser's origin after the gateway proxies it must pass the official
  * /api trust fence. Feed every plausible literal form. */
@@ -149,16 +197,24 @@ async function serviceLifecycle(action, mode, n) {
       if (!config.relay?.instanceToken) fail("relay.instanceToken not configured — run: dsh --profile mobile relay connect <relay-url> --token <instance-token>");
     }
     const port = 3080;
-    const occupied = !(await checkPortFree(port)).free;
+    let occupied = !(await checkPortFree(port)).free;
     if (occupied && !service.serviceStatus({ config }).running) {
-      console.error(`port ${port} is occupied by another process — most likely your existing dsh web.`);
-      console.error("This machine must run ONE dsh web (session logs are single-writer).");
-      console.error("Stop that instance, then re-run:");
-      console.error(`  dsh --profile mobile ${mode} start`);
-      console.error("");
-      console.error("Nothing is lost: sessions live on disk under $DSH_HOME/sessions and the");
-      console.error("resident instance lists ALL of them, live-streaming included.");
-      return 1;
+      // The instance we just stopped (restart path, or a stop moments ago) may
+      // still be releasing the port. Give it a few seconds before declaring a
+      // foreign occupant — otherwise `restart` falsely alarms on its own
+      // dying process.
+      if (await waitPortFree(port)) {
+        occupied = false;
+      } else {
+        console.error(`port ${port} is occupied by another process — most likely your existing dsh web.`);
+        console.error("This machine must run ONE dsh web (session logs are single-writer).");
+        console.error("Stop that instance, then re-run:");
+        console.error(`  dsh --profile mobile ${mode} start`);
+        console.error("");
+        console.error("Nothing is lost: sessions live on disk under $DSH_HOME/sessions and the");
+        console.error("resident instance lists ALL of them, live-streaming included.");
+        return 1;
+      }
     }
     if (!process.env.DEEPSEEK_API_KEY) {
       console.warn("warning: DEEPSEEK_API_KEY is not set in THIS shell. The resident instance inherits this shell's environment, so the phone will report 'no api key configured'. Start the service from a shell where the key is set (machine-level environment variables are inherited automatically).");
@@ -173,6 +229,8 @@ async function serviceLifecycle(action, mode, n) {
     console.log(`  logs : ${logPath}`);
     console.log(`  web  : ${await mobileUrl(config)}`);
     console.log("pair your phone: dsh --profile mobile device pair --name <name>");
+    const ready = await waitResidentReady(config);
+    console.log(ready ? "resident ready — refresh the phone now" : "resident still starting — refresh the phone in a few seconds");
     return 0;
   }
 
