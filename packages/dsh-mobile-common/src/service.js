@@ -192,9 +192,52 @@ export function syncSleep(ms) {
 // ---------------------------------------------------------------------------
 
 /**
- * Create a resident-service manager.
- * @param {object} [deps] injectable dependencies for testing
+ * Read a variable from the Windows registry environment scopes
+ * (HKLM machine scope, then HKCU user scope) — the system environment the
+ * user expects to "pass through". A stale shell (opened before the variable
+ * was set) misses machine-level vars in its snapshot, so this fallback makes
+ * the launcher independent of shell freshness.
+ * @param {string} name
+ * @param {Function} spawnImpl - spawnSync-like
+ * @returns {string|null} trimmed value, or null
  */
+export function readWindowsEnv(name, spawnImpl = nodeSpawnSync) {
+  const scopes = [
+    ['reg', 'query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', '/v', name],
+    ['reg', 'query', 'HKCU\\Environment', '/v', name],
+  ];
+  for (const args of scopes) {
+    let res;
+    try {
+      res = spawnImpl('reg', args, { encoding: 'utf8', windowsHide: true });
+    } catch {
+      continue;
+    }
+    if (res && res.status === 0) {
+      const match = /\sREG(?:_EXPAND)?_SZ\s+(.+)$/m.exec(res.stdout ?? '');
+      if (match) return match[1].trim();
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolve the launch environment for the resident instance. Inherits the
+ * launching process environment; on Windows, falls back to the registry
+ * scopes for DEEPSEEK_API_KEY so a stale shell snapshot cannot strip the key.
+ * @returns {{ env: object, fallbackKey: boolean }}
+ */
+function buildChildEnv(env, platform, spawnImpl, extra) {
+  const childEnv = { ...env, ...extra };
+  if (platform === 'win32' && !childEnv.DEEPSEEK_API_KEY) {
+    const fromRegistry = readWindowsEnv('DEEPSEEK_API_KEY', spawnImpl);
+    if (fromRegistry) {
+      childEnv.DEEPSEEK_API_KEY = fromRegistry;
+      return { env: childEnv, fallbackKey: true };
+    }
+  }
+  return { env: childEnv, fallbackKey: false };
+}
 export function createService(deps = {}) {
   const {
     platform = process.platform,
@@ -277,12 +320,28 @@ export function createService(deps = {}) {
     for (const authority of authorities || []) {
       args.push('--trusted-host', authority);
     }
-    const childEnv = {
-      ...env,
+    const { env: childEnv, fallbackKey } = buildChildEnv(env, platform, spawnSyncImpl, {
       DSH_MOBILE_INSTANCE: '1',
       DSH_MOBILE_TOKEN: token,
       DSH_MOBILE_GATEWAY_PORT: String(config.gatewayPort ?? 3081),
-    };
+    });
+    try {
+      const envHas = Boolean(env && typeof env.DEEPSEEK_API_KEY === 'string' && env.DEEPSEEK_API_KEY.length > 0);
+      const registryHas = platform === 'win32' ? (fallbackKey ? 'yes (used)' : 'no') : 'n/a';
+      fs.appendFileSync(
+        logPath,
+        `[dsh-mobile-cli] start: DEEPSEEK_API_KEY in launching shell env: ${envHas}; in Windows registry: ${registryHas}; child gets key: ${Boolean(childEnv.DEEPSEEK_API_KEY)}\n`,
+      );
+    } catch {
+      // log may be gone
+    }
+    if (fallbackKey) {
+      try {
+        fs.appendFileSync(logPath, '[dsh-mobile-cli] DEEPSEEK_API_KEY not present in this shell — inherited from the Windows registry (machine/user environment)\n');
+      } catch {
+        // log may be gone
+      }
+    }
 
     let child;
     try {

@@ -322,3 +322,29 @@ test('startService reports alreadyRunning from the core result', () => {
   const res = startService({ config: {} }, svc);
   assert.deepEqual(res, { started: false, alreadyRunning: true, pid: 9, error: 'service already running (pid 9)' });
 });
+
+test('readWindowsEnv reads machine then user registry scopes', async () => {
+  const { readWindowsEnv } = await import('../src/service.js');
+
+  const machineHit = (cmd, args) => {
+    assert.equal(cmd, 'reg');
+    assert.equal(args[2], 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment');
+    return { status: 0, stdout: '    DEEPSEEK_API_KEY    REG_SZ    sk-mach\n' };
+  };
+  assert.equal(readWindowsEnv('DEEPSEEK_API_KEY', machineHit), 'sk-mach');
+
+  const machineMiss = (cmd, args) => {
+    if (args[2].startsWith('HKLM')) return { status: 1, stdout: '' };
+    assert.equal(args[2], 'HKCU\\Environment');
+    return { status: 0, stdout: '    DEEPSEEK_API_KEY    REG_EXPAND_SZ    sk-user\n' };
+  };
+  assert.equal(readWindowsEnv('DEEPSEEK_API_KEY', machineMiss), 'sk-user');
+
+  const none = () => ({ status: 1, stdout: '' });
+  assert.equal(readWindowsEnv('DEEPSEEK_API_KEY', none), null);
+
+  const throws = () => {
+    throw new Error('reg missing');
+  };
+  assert.equal(readWindowsEnv('DEEPSEEK_API_KEY', throws), null);
+});
