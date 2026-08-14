@@ -38,30 +38,30 @@ dsh plugin --profile mobile add @bb-84c/dsh-mobile-cli      # the `dsh mobile` c
 dsh plugin --profile web    add @bb-84c/dsh-mobile-server   # gateway + tailscale/relay transports
 ```
 
-All mobile functionality is behind one unified entry point:
+All mobile functionality is behind one unified entry point — a `mobile` profile installed with the stock plugin manager:
 
 ```
-dsh mobile [options] [args]
+dsh --profile mobile [options] [args]
 ```
 
-A thin wrapper (`.ps1` / `.sh` / `.cmd`) in front of the stock `dsh` launcher routes `dsh mobile …` to the `mobile` profile; everything else is forwarded untouched. See [`docs/plugin-install.md`](docs/plugin-install.md).
+No wrapper, no PATH tricks, no patched launcher: `--profile` is the stock entry mechanism and every dsh-side feature ships as a plugin. See [`docs/plugin-install.md`](docs/plugin-install.md).
 
 ## Quickstart
 
 ```sh
-# 1. install the plugins (wrapper + profiles, one command)
-dsh mobile install            # after installing the wrapper, see docs/plugin-install.md
+# 1. install the plugins (creates the `mobile` profile, one command)
+dsh --profile mobile install
 
 # 2. choose a transport
-dsh mobile tailscale status                       # tailscale point-to-point
-dsh mobile relay connect --relay wss://relay.example.com --token <instance-token>
+dsh --profile mobile tailscale status             # tailscale point-to-point
+dsh --profile mobile relay connect --relay wss://relay.example.com --token <instance-token>
 
 # 3. bring the resident service online
-dsh mobile service start
+dsh --profile mobile service start
 
 # 4. pair your phone
-dsh mobile device pair --name iPhone              # prints a pairing URL/QR
-dsh mobile url                                    # open the remote dsh Web UI
+dsh --profile mobile device pair --name iPhone    # prints a pairing URL/QR
+dsh --profile mobile url                          # open the remote dsh Web UI
 ```
 
 ## Documentation

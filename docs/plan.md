@@ -18,7 +18,8 @@
 约束（用户给定）：
 
 - 所有 dsh 侧改造 = **dsh 插件**（npm 包，`dsh.bundle.patch`），不 fork、不改官方包、不改官方 preset。
-- 统一入口 `dsh mobile [options] [args]`。
+- 统一入口 `dsh --profile mobile [options] [args]`（用户决策：不用 wrapper，官方 `--profile`
+  机制即入口；`mobile` 是一个装了本项目 CLI 插件的 profile）。
 - 三平台：Windows / macOS / Linux；必须上脚本的只写 `.ps1` + `.sh`（.sh 通用于 macOS/Linux），
   Windows 另附 `.cmd` 转发壳。
 - 参考 opencode-mobile-solution 的**连接与管理逻辑**，禁止抄其 UI/UX。
@@ -33,7 +34,7 @@
    其余参数原样透传给 profile 的 app 树，由挂载的插件用 `@deepseek-ai/dsh-cmdline` 的
    `parseCmdline(ctx, program)` 自行解析（`cmdlineArgs` 服务 + `appExit`）。
    → **结论**：裸 `dsh mobile ...` 会被启动器拒绝（`--profile <name> is required`），
-   必须用 PATH 前置的 wrapper 拦截 `mobile` 并改写为 `dsh --profile mobile ...`。
+   统一入口采用 `dsh --profile mobile <args>`（用户决策，见 §6-1），不引入 wrapper。
 2. **插件机制**（`lib/plugin-*.js` + `dsh-app-boot`）：`dsh plugin --profile <name> add <pkg>`
    在 profile 目录跑 pnpm，然后把声明了 `dsh.bundle.patch` 的依赖自动追加进
    `package.json` 的 `dsh.profile.bundles` 层栈。bundle patch 是 loader patch 条目列表
@@ -104,29 +105,29 @@ opencode-mobile-solution 调研结论见 `docs/research/opencode-mobile-architec
 | wrapper（`dsh` 前置壳） | `.ps1` / `.sh` / `.cmd` | `~/.dsh/mobile/bin` + PATH 前置（installer 做） |
 | scripts | `.ps1` / `.sh` | 仓库 `scripts/`，installer 复制使用 |
 
-### 3.1 `dsh mobile` CLI（mobile profile = dsh-base + dsh-mobile-cli）
+### 3.1 `dsh --profile mobile` CLI（mobile profile = dsh-base + dsh-mobile-cli）
 
 命令族（超集于用户要求的 a/b/c，补充项标注 ★）：
 
 ```
-dsh mobile install                      一键安装 wrapper + 两个插件 ★
-dsh mobile uninstall                    完整卸载（不碰非 mobile 实例）★
-dsh mobile status                       总览：service/tailscale/relay/device 四块状态 ★
-dsh mobile service start|stop|restart|status|logs    (a) 本地常驻服务上线与重启
-dsh mobile tailscale status|ip|connect|ping         (b) tailscale 连接与状态
-dsh mobile relay connect|disconnect|status|ping     (c) VPS relay 连接与状态
-dsh mobile device pair|list|revoke                  设备配对与管理（1.4 认证核心）
-dsh mobile url                           打印手机访问 URL/二维码 ★
-dsh mobile config get|set|show            配置（模式/端口/relay 地址/主机名）★
-dsh mobile doctor                        诊断：版本、端口冲突、连通性 ★
-dsh mobile update                        升级两个插件（转发 dsh plugin update）★
+install                      一键安装两个插件（mobile+web profile）★
+uninstall                    完整卸载（不碰非 mobile 实例）★
+status                       总览：service/tailscale/relay/device 四块状态 ★
+service start|stop|restart|status|logs   (a) 本地常驻服务上线与重启
+tailscale status|ip|connect|ping         (b) tailscale 连接与状态
+relay connect|disconnect|status|ping     (c) VPS relay 连接与状态
+device pair|list|revoke                  设备配对与管理（1.4 认证核心）
+url                           打印手机访问 URL/二维码 ★
+config get|set|show           配置（模式/端口/relay 地址/主机名）★
+doctor                        诊断：版本、端口冲突、连通性 ★
+update                        升级两个插件（转发 dsh plugin update）★
 ```
 
 实现要点：
 
-- bundle patch 加一个 cmdline 行：注入 `cmdlineArgs`，`args[0]==="mobile"` 时剥掉前缀，
-  用 commander 解析剩余参数，action 内执行命令并 `ctx.appExit(code)`；非 mobile 参数时完全惰性
-  （避免与 web profile 的 `web-startup` 抢解析——防御性，正常情况两个插件装在不同 profile）。
+- bundle patch 加一个 cmdline 行：注入 `cmdlineArgs`（官方启动器把 `--profile mobile`
+  之后的参数原样透传，本 profile 内没有其他 app 抢解析），用 commander 解析，
+  action 内执行命令并 `ctx.appExit(code)`；`--help`/解析错误走 parseCmdline 标准行为。
 - 命令实现全部走 `$DSH_HOME/mobile/`（配置 config.json、pid、日志、设备哈希库），
   永不写 profile 或官方目录。
 
@@ -159,16 +160,13 @@ dsh mobile update                        升级两个插件（转发 dsh plugin 
 - 部署：`scripts/relay-deploy.sh`（Caddy+Let's Encrypt 或 tailscale 可选）、systemd unit 模板、
   `docs/deployment/relay.md`。监听 127.0.0.1，TLS 交给 Caddy。
 
-### 3.4 wrapper 与 installer
+### 3.4 installer
 
-- wrapper 拦截 `dsh mobile ...` → exec 真 dsh `--profile mobile mobile ...`（其余参数原样透传，
-  含 `dsh web`、`dsh --profile tui` 等）。真 dsh 路径在安装时记录。
-- `.ps1`（Windows PowerShell）/ `.sh`（macOS/Linux bash/zsh 通用）/ `.cmd`（cmd.exe 转 .ps1）。
-- installer（`scripts/install-mobile.ps1` / `.sh`）：装 wrapper 到 `~/.dsh/mobile/bin`、
-  修改用户 PATH、执行 `dsh plugin --profile mobile add @bb-84c/dsh-mobile-cli` 与
-  `dsh plugin --profile web add @bb-84c/dsh-mobile-server`。
-- 已知取舍：官方启动器不可扩展（插件不能加顶层子命令），wrapper 是唯一合规入口方式，
-  文档中如实说明。
+- `dsh --profile mobile install`：执行 `dsh plugin --profile mobile add @bb-84c/dsh-mobile-cli`
+  与 `dsh plugin --profile web add @bb-84c/dsh-mobile-server`，并在 `$DSH_HOME/mobile/`
+  初始化 config.json。profile 首次不存在时官方机制以 `DEFAULT_PROFILE_BUNDLES` 自动初始化。
+- 便利脚本 `scripts/install-mobile.ps1` / `.sh`：npm 装包 + 上述 install 一条龙（可选路径）。
+- 入口不做 wrapper（用户决策）：README 与全部文档统一写 `dsh --profile mobile`。
 
 ### 3.5 设备认证与 1.4 的两种界面
 
@@ -185,7 +183,7 @@ dsh mobile update                        升级两个插件（转发 dsh plugin 
 | # | 里程碑 | 内容 | 状态 |
 | --- | --- | --- | --- |
 | M0 | 基础 context + 规划 | 调研 dsh 源码与 opencode-mobile；git 仓库脚手架；本 plan | ✅ 进行中（本 commit 收尾） |
-| M1 | dsh-mobile-cli 插件 | `dsh mobile` 命令族骨架 + service 管理 + config/status/url/doctor | ⬜ |
+| M1 | dsh-mobile-cli 插件 | `dsh --profile mobile` 命令族骨架 + service 管理 + config/status/url/doctor | ⬜ |
 | M2 | dsh-mobile-server 插件 | gateway 反代 + 设备认证 + tailscale 绑定 + 常驻服务联调 | ⬜ |
 | M3 | relay + 隧道 | dsh-relay 服务 + 实例隧道客户端 + 目录/多路复用 | ⬜ |
 | M4 | 设备配对与安全加固 | 配对码兑换、哈希存储、撤销踢会话、限速、文档化威胁模型 | ⬜ |
@@ -208,7 +206,7 @@ deepseek-harness-mobile-solution/
 │   ├── dsh-mobile-server/     # dsh 插件：gateway + 认证 + tailscale/relay 传输
 │   └── dsh-relay/             # 独立 Node 服务：VPS relay
 ├── scripts/
-│   ├── install-mobile.ps1/.sh # wrapper + 插件一键安装
+│   ├── install-mobile.ps1/.sh # 插件一键安装（可选便利脚本）
 │   ├── relay-deploy.ps1/.sh   # VPS relay 部署
 │   └── *.service / *.plist / .xml   # 三平台自启模板
 ├── docs/
@@ -220,20 +218,20 @@ deepseek-harness-mobile-solution/
 └── reference/                 # gitignored：opencode-mobile-solution clone
 ```
 
-## 6. 待确认决策（讨论后回填结论）
+## 6. 已确认决策（2026 与用户讨论结论）
 
-1. `dsh mobile` 入口：wrapper 前置 PATH（推荐）vs 仅文档化 `dsh --profile mobile`。
-2. 设备认证模型：opencode 式全量（设备 token + passkey owner）vs 精简（token 配对 + 可撤销）。
-3. 常驻服务形态：detached spawn（推荐）+ 可选登录自启模板 vs 强制系统服务化。
-4. relay 传输：出站 WebSocket 多路复用（推荐）vs FRP 兼容 vs 双模。
-5. TLS：tailscale 模式先 HTTP-over-tailnet（WireGuard 已加密）还是上 `tailscale serve` HTTPS；
-   relay 模式是否默认 Caddy 方案。
-6. 移动 web 通知：第一阶段是否需要 PWA+Web Push 审批推送。
+1. **入口**：`dsh --profile mobile [options] [args]`；**不做 wrapper**（用户明确选择）。
+2. **设备认证**：全量 opencode 式 —— 一次性配对码/QR 兑换长期设备 token（SHA-256 哈希存储、
+   可撤销并踢会话）；relay owner dashboard 支持 WebAuthn passkey + bootstrap secret。
+3. **常驻服务**：detached spawn + 可选登录自启模板（Task Scheduler/launchd/systemd）。
+4. **relay 传输**：出站 WebSocket 多路复用。
+5. **TLS**：tailscale 模式一期 HTTP-over-tailnet（WireGuard 已加密），二期可选 `tailscale serve`
+   HTTPS；relay 模式 Caddy + Let's Encrypt。
+6. **移动通知**：一期仅浏览器内操作；PWA Web Push / APNs / FCM 写入 specs 二期章节。
 
 ## 7. 风险与注意
 
 - **官方 dsh 升级破坏兼容**：依赖 rc.6 的插件机制与启动器行为；doctor 检查版本；CI 无（私有仓库）。
-- **Windows PATH 劫持**：wrapper 前置 PATH 可能与 npm 全局 dsh 冲突；installer 幂等并写清文档。
 - **网关即新增攻击面**：认证先于一切路由、限速、审计日志；安全模型文档化（docs/deployment 内含 threat model 节）。
 - **误杀非 mobile 实例**：pidfile + 创建时间 + 启动令牌三重校验（用户红线要求）。
 - **沙箱限制**：本 agent 测试 tailscale/gh/git 网络类命令可能被沙箱挡，按需升级重试。
