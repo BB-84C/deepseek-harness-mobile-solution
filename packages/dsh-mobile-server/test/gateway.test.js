@@ -61,6 +61,12 @@ before(async () => {
 
   // fake dsh web target
   targetServer = http.createServer((req, res) => {
+    if (req.url.startsWith('/page')) {
+      const html = '<!doctype html><html><head><title>t</title></head><body>x</body></html>';
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-length': String(Buffer.byteLength(html)) });
+      res.end(html);
+      return;
+    }
     if (req.url.startsWith('/sse')) {
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       res.write('data: {"a":1}\n\n');
@@ -197,6 +203,19 @@ test('bearer proxy forwards method, body and headers', async () => {
   assert.strictEqual(body.method, 'POST');
   assert.strictEqual(body.url, '/api/submit?q=2');
   assert.strictEqual(body.body, 'hello body');
+});
+
+test('HTML responses get the secure-context crypto.randomUUID polyfill injected', async () => {
+  const res = await request('/page', {
+    headers: { authorization: `Bearer ${deviceToken}` },
+  });
+  assert.strictEqual(res.status, 200);
+  const html = res.text();
+  assert.ok(html.includes('crypto.randomUUID'), 'polyfill present');
+  assert.ok(html.includes('<head>'), 'original head tag kept');
+  assert.ok(html.indexOf('randomUUID') < html.indexOf('</head>'), 'injected inside head region');
+  assert.ok(html.includes('<body>x</body>'), 'body preserved');
+  assert.strictEqual(res.headers['content-length'], undefined, 'length stripped (streamed chunked)');
 });
 
 test('device token login via POST /mobile/auth sets a session', async () => {

@@ -1,7 +1,19 @@
 # The dsh-mobile-server bundle patch: the mobile gateway inside the resident
-# `web` profile. One row; the plugin is fully inert unless the process was
-# launched by `dsh --profile mobile service start` (env DSH_MOBILE_INSTANCE=1),
-# so ordinary `dsh web` runs are untouched.
+# `web` profile. The plugin row is fully inert unless the process was launched
+# by `dsh --profile mobile service start` (env DSH_MOBILE_INSTANCE=1), so
+# ordinary `dsh web` runs are untouched.
 - insert:
     - id: mobile-gateway
       name: '@bb-84c/dsh-mobile-server/startup'
+
+# Remote browsers cannot show the host-native directory dialog (it appears on
+# the dsh machine, not the phone). Pin the browser-based directory picker:
+# disable the auto row (which resolves to native for a loopback-bound web) and
+# mount the browse picker directly — the shipped web-app bundle documents this
+# exact overlay pattern.
+- id: directory-picker
+  disabled: true
+
+- insert:
+    - id: directory-picker-browse
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'

@@ -58,6 +58,10 @@ async function computeAuthorities(config) {
 }
 
 async function mobileUrl(config) {
+  if (config.mode === "tailscale" && tailscale.isServeActive()) {
+    const host = tailscale.tailscaleHostname();
+    if (host) return `https://${host}/`;
+  }
   const ip = config.mode === "tailscale" ? tailscale.tailscaleIp4() : null;
   const host = config.mode === "tailscale" ? tailscale.tailscaleHostname() : null;
   return buildAccessUrl({ config, tailscaleIp: ip, tailscaleHostname: host });
@@ -214,8 +218,32 @@ async function cmdTailscale(args) {
       console.log(result.stdout ?? "");
       return result.ok ? 0 : 1;
     }
+    case "serve": {
+      const subAction = args.slice(1)[0];
+      if (subAction === "on") {
+        const { config } = loadConfig();
+        const result = tailscale.tailscaleServeOn(config.gatewayPort ?? 3081);
+        if (!result.ok) fail(result.error ?? `tailscale serve failed: ${result.stderr ?? ""}`.trim());
+        console.log(result.stdout || "tailscale serve enabled");
+        const host = tailscale.tailscaleHostname();
+        console.log(host ? `remote URL: https://${host}/` : "remote URL: https://<your-node>.ts.net/");
+        return 0;
+      }
+      if (subAction === "off") {
+        const result = tailscale.tailscaleServeOff();
+        if (!result.ok) fail(result.error ?? `tailscale serve off failed: ${result.stderr ?? ""}`.trim());
+        console.log("tailscale serve disabled");
+        return 0;
+      }
+      if (subAction === "status" || subAction === undefined) {
+        const active = tailscale.isServeActive();
+        console.log(active ? "serve: enabled (https://<your-node>.ts.net/ → gateway)" : "serve: disabled");
+        return 0;
+      }
+      fail(`unknown serve action ${JSON.stringify(subAction)} — use status | on | off`);
+    }
     default:
-      fail(`unknown action ${JSON.stringify(action)} — use status | ip | connect | ping [host]`);
+      fail(`unknown action ${JSON.stringify(action)} — use status | ip | connect | ping [host] | serve [status|on|off]`);
   }
 }
 

@@ -46,8 +46,8 @@ const SUBCOMMANDS = [
   },
   {
     name: "tailscale",
-    description: "tailscale transport (b) — status | ip | connect | ping [host]",
-    argsDesc: "<action> [host]",
+    description: "tailscale transport (b) — status | ip | connect | ping [host] | serve [status|on|off]",
+    argsDesc: "<action> [args...]",
     options: [],
   },
   {

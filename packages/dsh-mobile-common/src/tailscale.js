@@ -142,3 +142,31 @@ export function tailscaleServeStatus(opts = {}) {
     return { ok: false, raw: r.stdout, error: 'tailscale serve status returned invalid JSON' };
   }
 }
+
+/**
+ * Enable `tailscale serve` HTTPS for the mobile gateway: the node's MagicDNS
+ * name gets a Let's-Encrypt-backed cert and forwards :443 to the loopback
+ * gateway. `--bg` keeps the config active across tailscaled restarts.
+ */
+export function tailscaleServeOn(targetPort = 3081, opts = {}) {
+  return run(['serve', '--bg', '--https=443', `http://127.0.0.1:${targetPort}`], opts);
+}
+
+/** Disable the tailscale serve HTTPS mapping. */
+export function tailscaleServeOff(opts = {}) {
+  return run(['serve', '--https=443', 'off'], opts);
+}
+
+/**
+ * Whether `tailscale serve` is currently serving HTTPS for the gateway.
+ * Defensive against the JSON shape drifting between tailscale versions.
+ * @param {object} [opts]
+ * @returns {boolean}
+ */
+export function isServeActive(opts = {}) {
+  const status = tailscaleServeStatus(opts);
+  if (!status.ok || !status.json) return false;
+  const tcp443 = status.json.TCP && status.json.TCP['443'];
+  const web443 = status.json.Web && status.json.Web['443'];
+  return Boolean(tcp443?.HTTPS) || Boolean(web443?.HTTPS);
+}

@@ -14,6 +14,7 @@ import http from 'node:http';
 import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
+import { Transform } from 'node:stream';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 
 import { loadConfig } from '@bb-84c/dsh-mobile-common/config.js';
@@ -102,6 +103,63 @@ function filterHeaders(headers, stripSet) {
     out[key] = value;
   }
   return out;
+}
+
+// The official web frontend calls crypto.randomUUID (RPC ids, directory
+// picker), which browsers only expose in SECURE CONTEXTS. Tailscale mode
+// serves plain http over the tailnet (WireGuard already encrypts it), so
+// remote browsers lack the API. Inject a minimal polyfill into HTML responses
+// (getRandomValues stays available outside secure contexts). Real TLS via
+// `tailscale serve` remains the recommended path; this keeps plain-http mode
+// functional.
+const SECURE_CONTEXT_POLYFILL =
+  "<script>(function(){if(!globalThis.crypto||typeof crypto.randomUUID!=='function'){" +
+  "var c=globalThis.crypto||{};" +
+  "var r=c.getRandomValues?function(a){return c.getRandomValues(a)}:function(a){for(var i=0;i<a.length;i++)a[i]=Math.floor(Math.random()*256)};" +
+  "c.randomUUID=function(){var b=new Uint8Array(16);r(b);b[6]=(b[6]&15)|64;b[8]=(b[8]&63)|128;" +
+  "var h=Array.from(b,function(x){return x.toString(16).padStart(2,'0')});" +
+  "return h.slice(0,4).join('')+'-'+h.slice(4,6).join('')+'-'+h.slice(6,8).join('')+'-'+h.slice(8,10).join('')+'-'+h.slice(10).join('')};" +
+  "globalThis.crypto=c;}})();</script>";
+
+/**
+ * Stream transform that injects `tag` right after the first `<head ...>` tag.
+ * Byte-safe: searches in latin1 so multibyte UTF-8 split across chunks is not
+ * corrupted. If no head appears within 64 KiB the stream passes through
+ * untouched (the content is not a page we should modify).
+ */
+function makeHtmlInjector(tag) {
+  let pending = Buffer.alloc(0);
+  let done = false;
+  return new Transform({
+    transform(chunk, _encoding, cb) {
+      if (done) return cb(null, chunk);
+      pending = Buffer.concat([pending, chunk]);
+      const text = pending.toString('latin1');
+      const match = /<head[^>]*>/i.exec(text);
+      if (match) {
+        done = true;
+        const end = match.index + match[0].length;
+        const out = Buffer.concat([
+          Buffer.from(text.slice(0, end), 'latin1'),
+          Buffer.from(tag, 'utf8'),
+          Buffer.from(text.slice(end), 'latin1'),
+        ]);
+        pending = Buffer.alloc(0);
+        return cb(null, out);
+      }
+      if (pending.length > 64 * 1024) {
+        done = true;
+        const out = pending;
+        pending = Buffer.alloc(0);
+        return cb(null, out);
+      }
+      cb(null);
+    },
+    flush(cb) {
+      if (!done && pending.length > 0) cb(null, pending);
+      else cb(null);
+    },
+  });
 }
 
 function resolvePort(env, config) {
@@ -679,8 +737,19 @@ export function createGateway(deps = {}) {
         let upstreamEnded = false;
         const resHeaders = filterHeaders(proxyRes.headers, HOP_BY_HOP);
         resHeaders['x-dsh-mobile-gateway'] = '1';
-        res.writeHead(proxyRes.statusCode, resHeaders);
-        proxyRes.pipe(res);
+        const contentType = typeof proxyRes.headers['content-type'] === 'string' ? proxyRes.headers['content-type'].toLowerCase() : '';
+        const isHtml = contentType.includes('text/html');
+        const isEncoded = proxyRes.headers['content-encoding'] !== undefined;
+        if (isHtml && !isEncoded) {
+          // Inject the secure-context polyfill; length changes, so stream
+          // chunked instead of trusting the upstream content-length.
+          delete resHeaders['content-length'];
+          res.writeHead(proxyRes.statusCode, resHeaders);
+          proxyRes.pipe(makeHtmlInjector(SECURE_CONTEXT_POLYFILL)).pipe(res);
+        } else {
+          res.writeHead(proxyRes.statusCode, resHeaders);
+          proxyRes.pipe(res);
+        }
         proxyRes.on('end', () => {
           upstreamEnded = true;
         });
