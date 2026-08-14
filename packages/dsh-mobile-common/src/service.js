@@ -203,8 +203,8 @@ export function syncSleep(ms) {
  */
 export function readWindowsEnv(name, spawnImpl = nodeSpawnSync) {
   const scopes = [
-    ['reg', 'query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', '/v', name],
-    ['reg', 'query', 'HKCU\\Environment', '/v', name],
+    ['query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', '/v', name],
+    ['query', 'HKCU\\Environment', '/v', name],
   ];
   for (const args of scopes) {
     let res;

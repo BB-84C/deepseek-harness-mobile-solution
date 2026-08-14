@@ -328,14 +328,14 @@ test('readWindowsEnv reads machine then user registry scopes', async () => {
 
   const machineHit = (cmd, args) => {
     assert.equal(cmd, 'reg');
-    assert.equal(args[2], 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment');
+    assert.equal(args[1], 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment');
     return { status: 0, stdout: '    DEEPSEEK_API_KEY    REG_SZ    sk-mach\n' };
   };
   assert.equal(readWindowsEnv('DEEPSEEK_API_KEY', machineHit), 'sk-mach');
 
   const machineMiss = (cmd, args) => {
-    if (args[2].startsWith('HKLM')) return { status: 1, stdout: '' };
-    assert.equal(args[2], 'HKCU\\Environment');
+    if (args[1].startsWith('HKLM')) return { status: 1, stdout: '' };
+    assert.equal(args[1], 'HKCU\\Environment');
     return { status: 0, stdout: '    DEEPSEEK_API_KEY    REG_EXPAND_SZ    sk-user\n' };
   };
   assert.equal(readWindowsEnv('DEEPSEEK_API_KEY', machineMiss), 'sk-user');
