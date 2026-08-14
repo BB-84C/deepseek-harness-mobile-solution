@@ -107,6 +107,21 @@ systemctl --user daemon-reload
 systemctl --user enable --now dsh-mobile.service
 ```
 
+## After a reboot
+
+- tailscaled reconnects on its own; `tailscale serve --bg` restores the
+  443 → gateway mapping automatically.
+- The resident instance starts at logon if you installed an auto-start
+  template once (previous section). Otherwise one command after boot:
+  `dsh --profile mobile service start`.
+- No key handling needed: the launcher inherits the shell environment and, on
+  Windows, falls back to the machine/user registry scopes for
+  `DEEPSEEK_API_KEY`.
+- The phone needs nothing after boot: its cookie persists for 30 days and
+  survives restarts (persisted session store). Open the URL and go.
+- Every persisted session is listed and validated at boot — see
+  `[mobile-session-hydrate]` in `service logs`.
+
 ## Ports
 
 | Port | Role | Bound to |

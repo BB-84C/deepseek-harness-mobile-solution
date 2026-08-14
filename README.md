@@ -70,6 +70,7 @@ dsh --profile mobile url                          # open the remote dsh Web UI
 | --- | --- | --- |
 | [`docs/plan.md`](docs/plan.md) | project | architecture, milestones, decisions (Chinese) |
 | [`docs/plugin-install.md`](docs/plugin-install.md) | users | plugin installation & upgrade |
+| [`docs/commands.md`](docs/commands.md) | users | full `dsh --profile mobile` command reference + lifecycle |
 | [`docs/deployment/tailscale.md`](docs/deployment/tailscale.md) | users | tailscale setup guide |
 | [`docs/deployment/relay.md`](docs/deployment/relay.md) | users | VPS relay deployment guide |
 | [`docs/deployment/service.md`](docs/deployment/service.md) | users | resident service & auto-start (Win/macOS/Linux) |
