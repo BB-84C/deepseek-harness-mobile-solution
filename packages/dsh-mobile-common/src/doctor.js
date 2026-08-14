@@ -3,6 +3,7 @@
 // (`probes`) so the suite can run fully offline.
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { validateConfig } from './config.js';
 import { findTailscale, tailscaleStatus, tailscaleIp4 } from './tailscale.js';
@@ -82,6 +83,49 @@ function nodeVersionOk(version) {
   return Number.isInteger(major) && major >= 22;
 }
 
+function readText(filePath) {
+  try {
+    return fs.readFileSync(filePath, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Does the resident dsh instance have a way to obtain the DeepSeek API key?
+ * The key can live in several places; a key that only exists in ANOTHER
+ * launcher's process environment is invisible to the mobile-spawned instance,
+ * which is the classic "works locally, fails on the phone" trap.
+ * @param {{ env?: object, home?: string, cwd?: string, homedir?: string }} [probes]
+ * @returns {{ level: string, check: string, detail: string }}
+ */
+export function checkLlmCredentials(probes = {}) {
+  const env = probes.env ?? process.env;
+  const mobileHome = probes.home ?? mobilePaths().home;
+  const dshHome = path.dirname(mobileHome);
+  const cwd = probes.cwd ?? process.cwd();
+  const homedir = probes.homedir ?? os.homedir();
+  const sources = [];
+  if (typeof env.DEEPSEEK_API_KEY === 'string' && env.DEEPSEEK_API_KEY.length > 0) {
+    sources.push('env DEEPSEEK_API_KEY');
+  }
+  if (fs.existsSync(path.join(dshHome, '.credentials.yaml'))) sources.push('.credentials.yaml');
+  const settings = readText(path.join(dshHome, 'settings.yaml'));
+  if (settings && /^llm-deepseek:/m.test(settings)) sources.push('settings.yaml llm-deepseek');
+  for (const envFile of [path.join(cwd, '.env'), path.join(homedir, '.env')]) {
+    const text = readText(envFile);
+    if (text && /^\s*DEEPSEEK_API_KEY\s*=/m.test(text)) sources.push(envFile);
+  }
+  if (sources.length > 0) {
+    return { level: 'ok', check: 'llm credentials', detail: sources.join(', ') };
+  }
+  return {
+    level: 'error',
+    check: 'llm credentials',
+    detail: 'no DeepSeek API key visible to the resident instance — configure it once in the dsh Web UI (Settings → Models, works from the phone too) or set DEEPSEEK_API_KEY when starting the service',
+  };
+}
+
 function defaultProbes(overrides = {}) {
   return {
     nodeVersion: process.versions.node,
@@ -94,6 +138,7 @@ function defaultProbes(overrides = {}) {
     checkWritable,
     checkRelay,
     fetch: fetch,
+    llmCredentials: () => checkLlmCredentials(),
     ...overrides,
   };
 }
@@ -156,6 +201,9 @@ export async function diagnose({ config, probes } = {}) {
       ? { level: 'ok', check: 'mobile home writable', detail: p.home }
       : { level: 'error', check: 'mobile home writable', detail: `${p.home}: ${w.error}` },
   );
+
+  // llm credentials for the resident instance
+  results.push(p.llmCredentials());
 
   const mode = config && config.mode;
   if (mode === 'relay') {

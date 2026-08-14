@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { diagnose } from '../src/doctor.js';
 import { defaultConfig } from '../src/config.js';
 
@@ -18,6 +21,7 @@ const happyProbes = {
   checkWritable: () => ({ writable: true }),
   checkRelay: async () => ({ ok: true, status: 200 }),
   fetch: async () => ({ status: 200 }),
+  llmCredentials: () => ({ level: 'ok', check: 'llm credentials', detail: 'env DEEPSEEK_API_KEY' }),
 };
 
 test('doctor reports ok for a healthy tailscale setup', async () => {
@@ -98,4 +102,40 @@ test('doctor errors when the mobile home is not writable', async () => {
     probes: { ...happyProbes, checkWritable: () => ({ writable: false, error: 'EACCES' }) },
   });
   assert.equal(findCheck(results, 'mobile home writable').level, 'error');
+});
+
+test('checkLlmCredentials finds env, settings, credentials and .env sources', async () => {
+  const { checkLlmCredentials } = await import('../src/doctor.js');
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-llm-'));
+
+  // 1. env key
+  const viaEnv = checkLlmCredentials({ env: { DEEPSEEK_API_KEY: 'x' }, home: path.join(tmp, 'mobile'), cwd: tmp, homedir: tmp });
+  assert.equal(viaEnv.level, 'ok');
+  assert.match(viaEnv.detail, /env DEEPSEEK_API_KEY/);
+
+  // 2. settings.yaml llm-deepseek section
+  const dshHome = tmp;
+  fs.mkdirSync(path.join(dshHome, 'mobile'), { recursive: true });
+  fs.writeFileSync(path.join(dshHome, 'settings.yaml'), 'llm-deepseek:\n  apiKey: xxx\n');
+  const viaSettings = checkLlmCredentials({ env: {}, home: path.join(dshHome, 'mobile'), cwd: tmp, homedir: tmp });
+  assert.equal(viaSettings.level, 'ok');
+  assert.match(viaSettings.detail, /settings\.yaml llm-deepseek/);
+  fs.rmSync(path.join(dshHome, 'settings.yaml'));
+
+  // 3. .credentials.yaml presence
+  fs.writeFileSync(path.join(dshHome, '.credentials.yaml'), 'llm-deepseek:\n  apiKey: xxx\n');
+  const viaCred = checkLlmCredentials({ env: {}, home: path.join(dshHome, 'mobile'), cwd: tmp, homedir: tmp });
+  assert.equal(viaCred.level, 'ok');
+  fs.rmSync(path.join(dshHome, '.credentials.yaml'));
+
+  // 4. project .env
+  fs.writeFileSync(path.join(tmp, '.env'), 'DEEPSEEK_API_KEY=xxx\n');
+  const viaEnvFile = checkLlmCredentials({ env: {}, home: path.join(dshHome, 'mobile'), cwd: tmp, homedir: tmp });
+  assert.equal(viaEnvFile.level, 'ok');
+  fs.rmSync(path.join(tmp, '.env'));
+
+  // 5. nothing configured
+  const none = checkLlmCredentials({ env: {}, home: path.join(dshHome, 'mobile'), cwd: tmp, homedir: tmp });
+  assert.equal(none.level, 'error');
+  await fs.rm(tmp, { recursive: true, force: true });
 });
