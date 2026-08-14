@@ -63,7 +63,7 @@
  */
 
 export const name = "mobile-session-hydrate";
-export const inject = ["sessions"];
+export const inject = ["sessions", "sessionPersistence"];
 
 /**
  * Reconcile persisted sessions against the live store.
@@ -140,6 +140,9 @@ export function apply(ctx) {
   const logger = ctx.logger;
 
   if (sessions === undefined || persistence === undefined) {
+    console.warn(
+      "[mobile-session-hydrate] sessions/sessionPersistence service absent; session hydration skipped",
+    );
     logger?.warn?.(
       "[mobile-session-hydrate] sessions/sessionPersistence service absent; session hydration skipped",
     );
@@ -149,6 +152,7 @@ export function apply(ctx) {
   const attach = process.env.DSH_MOBILE_SESSION_ATTACH === "1";
   const abort = new AbortController();
   const detachers = [];
+  console.log(`[mobile-session-hydrate] starting (attach=${attach}, sessions=${sessions !== undefined}, persistence=${persistence !== undefined})`);
 
   const dispose = () => {
     abort.abort();
@@ -163,9 +167,11 @@ export function apply(ctx) {
 
   reconcile({ sessions, persistence, attach, signal: abort.signal, logger, onAttach: (detach) => detachers.push(detach) })
     .then((report) => {
+      console.log(`[mobile-session-hydrate] ${JSON.stringify(report)}`);
       logger?.info?.(`[mobile-session-hydrate] ${JSON.stringify(report)}`);
     })
     .catch((error) => {
+      console.error(`[mobile-session-hydrate] hydration failed: ${String(error?.message ?? error)}`);
       logger?.warn?.(`[mobile-session-hydrate] hydration failed: ${String(error?.message ?? error)}`);
     });
 
