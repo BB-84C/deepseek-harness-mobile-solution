@@ -203,12 +203,20 @@ update                        升级两个插件（转发 dsh plugin update）�
 当前进度：**全部里程碑代码完成，本机端到端验收通过**（docs/acceptance.md，2026-08-14）：
 tailscale 点对点（gateway 绑 tailnet 可达、配对、官方 SPA 代理、撤销踢会话、限速、开放重定向防护）
 与 relay fan-in（本机真实 relay + 隧道 + 深链配对 + 官方 SPA 全链路）均实测通过；防误杀红线实测通过。
-2026-08-14 更新：**真实 VPS relay 部署 + 公网入口实测通过**（`https://dsh.bb84.ai/instance/<id>` +
-`dsh_instance` 路由 cookie + picker）。期间修复 relay 模式三个关键 bug（见 §8）：
-(1) 隧道 fetch 自动跟随重定向吞掉 302 的 Set-Cookie → 手机配对"成功但显示 Sign in failed"；
-(2) auth 页无错误参数时误显 "Sign in failed."；
-(3) registry 空闲流定时器以 `undefined` 重武装（0ms 触发）→ 所有跨 tick 的大响应被立即销毁（空回复/CF 502）。
-剩余仅用户侧复核项：手机真机浏览器配对、第二设备 tailscale、macOS/Linux 实测、双实例 fan-in。
+2026-08-14 更新：**真实 VPS relay 部署 + 公网入口实测通过**（`https://dsh.bb84.ai`）：
+- 根路径 = **主菜单（实例选择器）**：裸 `/` 永远渲染 picker（带不带路由 cookie 都一样），进入某台机器
+  是用户在菜单里的主动选择（`/instance/<id>/`）；其余根空间路径（`/api`、`/mobile` 等）仍按
+  `dsh_instance` cookie 路由，官方前端的绝对路径不受影响。gateway 在 relay 模式给自身重定向加
+  `/instance/<id>` 前缀，配对/登录流程不会把手机甩回根菜单；登出回到菜单。
+- 手机（iPhone）与第二设备（MacBook，tailscale 与 relay 双通道）均已实测进入官方 UI、会话列表完整。
+- 期间修复 relay 模式四个关键 bug（见 §8）：
+  (1) 隧道 fetch 自动跟随重定向吞掉 302 的 Set-Cookie → 手机配对"成功但显示 Sign in failed"；
+  (2) auth 页无错误参数时误显 "Sign in failed."；
+  (3) registry 空闲流定时器以 `undefined` 重武装（0ms 触发）→ 所有跨 tick 的大响应被立即销毁（空回复/CF 502）；
+  (4) 隧道 fetch 禁止自定义 Host → Origin/Host 不一致 → 官方信任围栏对手机浏览器全部 /api 403（列表为空）。
+- restart 误报修复：守卫等待旧 resident 释放 3080 再判定外来占用；start/restart 等待 web 就绪并打印提示。
+剩余事项：移动 app 实现（specs 就绪）、macOS/Linux 上 CLI/常驻服务实测（浏览器访问已测）、
+多实例 fan-in 实测（第二台机器注册 relay）、relay owner passkey 注册（可选）。
 
 ## 5. 仓库布局
 
