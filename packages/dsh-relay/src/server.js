@@ -240,6 +240,12 @@ function sanitizeUpgradeHeaders(headers) {
   return out
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]))
+}
+
 // --- Server factory ---------------------------------------------------------
 
 export function createRelayServer(options = {}) {
@@ -275,6 +281,23 @@ export function createRelayServer(options = {}) {
   const rateLimiter = new RateLimiter(opts.rateLimitPerMin)
   let streamSeq = 0
   let startedAt = 0
+
+  // The menu page is server-rendered: the instance table ships in the HTML
+  // itself (no browser-JS dependency for the core content), and the inline
+  // script only refreshes it every 5s for liveness.
+  function renderDashboard() {
+    const list = registry.list()
+    const rows = list.length === 0
+      ? '<tr><td colspan="4" style="color:#8b949e">no instances registered yet — on a machine, run: dsh --profile mobile relay start</td></tr>'
+      : list.map((t) => {
+        const last = t.lastSeenMs ? new Date(t.lastSeenMs).toLocaleString() : '-'
+        const state = t.online ? '<span class="on">● online</span>' : '<span class="off">○ offline</span>'
+        return `<tr><td><a href="/instance/${escapeHtml(t.id)}/" style="color:#7ee787">${escapeHtml(t.id)}</a></td><td>${escapeHtml(t.name)}</td><td>${state}</td><td>${last}</td></tr>`
+      }).join('')
+    return DASHBOARD_HTML
+      .replaceAll('__WILDCARD__', JSON.stringify(opts.wildcardHost))
+      .replaceAll('__ROWS__', rows)
+  }
 
   // --- auth -----------------------------------------------------------------
 
@@ -846,7 +869,7 @@ export function createRelayServer(options = {}) {
         // without a routing cookie. Entering a machine is a deliberate choice
         // from the menu via /instance/<id>/.
         if (pathname === '/') {
-          return sendHtml(res, 200, DASHBOARD_HTML.replaceAll('__WILDCARD__', JSON.stringify(opts.wildcardHost)))
+          return sendHtml(res, 200, renderDashboard())
         }
         const selected = parseCookies(req)['dsh_instance'] || null
         if (selected && /^[a-z0-9-]{1,64}$/.test(selected)) {
@@ -882,7 +905,7 @@ export function createRelayServer(options = {}) {
     }
 
     if (method === 'GET' && (pathname === '/relay/' || pathname === '/relay')) {
-      return sendHtml(res, 200, DASHBOARD_HTML.replaceAll('__WILDCARD__', JSON.stringify(opts.wildcardHost)))
+      return sendHtml(res, 200, renderDashboard())
     }
 
     if (method === 'POST' && pathname === '/relay/api/setup') {
@@ -1271,7 +1294,7 @@ form { display: flex; gap: 8px; align-items: center; margin: 12px 0; flex-wrap: 
   <p style="color:#8b949e;font-size:13px">Pick a machine — device authentication happens on the machine itself.</p>
   <table id="instances">
     <thead><tr><th>ID</th><th>Name</th><th>Online</th><th>Last seen</th></tr></thead>
-    <tbody></tbody>
+    <tbody>__ROWS__</tbody>
   </table>
 </section>
 

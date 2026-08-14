@@ -321,6 +321,9 @@ describe('relay integration', () => {
     const html = res.text()
     assert.ok(html.includes('dsh hosts'))
     assert.ok(html.includes('createToken'))
+    // server-rendered: the instance table ships in the HTML (empty state when
+    // nothing has ever registered)
+    assert.ok(html.includes('no instances registered'))
   })
 
   test('targets list shape', async () => {
