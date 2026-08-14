@@ -142,7 +142,7 @@ Upgrade: websocket
 | 请求体超 4 MB | `413 {"error":"body-too-large"}` |
 | 转发头超 64 KB | `431 {"error":"headers-too-large"}` |
 | 30s 无任何帧（idle） | `504 {"error":"request-timeout"}` |
-| 凭据被撤销，在途请求 | `503 {"error":"token-revoked"}` |
+| 实例凭据被撤销，隧道被关 | `502 {"error":"instance-offline"}`（在途请求一并终止） |
 
 ## 5. 时限
 
@@ -197,8 +197,9 @@ Upgrade: websocket
    `instanceToken` 依赖该 TLS 保证传输机密性（query 可能进入反代访问日志，部署时
    建议关闭对 query 的记录）。
 2. **只存哈希**：所有凭据只存 SHA-256；原文仅在签发时回一次。
-3. **撤销即时生效**：撤销 instance token 立即关闭其隧道；撤销 client token 立即终止
-   其全部在途请求。
+3. **撤销即时生效**：撤销 instance token 立即关闭其隧道并终止其全部在途请求
+   （客户端收到 `502 instance-offline`）；撤销 client token 立即失效其目录访问
+   （`/relay/api/targets` 返回 401）。
 4. **比较**：校验使用 `crypto.timingSafeEqual` 语义的哈希查找（见 `tokens.js` 的
    `verify` 走哈希比对而非明文前缀匹配）。实际当前实现为哈希字符串等值查找，需在
    M4 安全加固时换为常量时间比较。

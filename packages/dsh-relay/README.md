@@ -56,7 +56,7 @@ Full wire contract: `docs/research/relay-protocol.md`.
 | `GET /relay/` | — | Owner dashboard (plain HTML/JS). |
 | `GET /relay/instance-tunnel?...` (Upgrade) | instance token | dsh instance outbound WebSocket tunnel. |
 | `GET /relay/api/targets` | client token \| owner cookie | `[{id,name,online,lastSeenMs}]`. |
-| `ALL /relay/instance/<id>/<path...>` | client token \| owner cookie | Forward over the instance tunnel. |
+| `ALL /relay/instance/<id>/<path...>` | — (the instance gateway authenticates) | Forward over the instance tunnel; `Authorization` passes through verbatim. |
 | `POST /relay/api/setup` | bootstrap token | One-time owner session (HttpOnly cookie). |
 | `GET /relay/api/tokens` | owner cookie | List tokens (hash prefixes only). |
 | `POST /relay/api/tokens` | owner cookie | Create a client/instance token (`{label, kind}`). |
@@ -64,7 +64,9 @@ Full wire contract: `docs/research/relay-protocol.md`.
 | `POST /relay/api/logout` | — | Clear the owner session cookie. |
 | `POST /relay/api/passkey/*` | — | `501` stub (WebAuthn passkey is M4). |
 
-Client token: `Authorization: Bearer <token>`. Owner: `dsh_relay_owner` HttpOnly
+Client token (`Authorization: Bearer <token>`) guards the directory only; the
+proxy path is transport-only — device credentials travel through the relay and
+are verified by the instance-side gateway. Owner: `dsh_relay_owner` HttpOnly
 cookie.
 
 ## Test

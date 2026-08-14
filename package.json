@@ -7,6 +7,6 @@
   "license": "MIT",
   "packageManager": "pnpm@10.12.4",
   "scripts": {
-    "test": "node --test packages/*/test packages/dsh-relay/test"
+    "test": "node --test --test-isolation=none \"packages/dsh-mobile-common/test/*.test.js\" \"packages/dsh-mobile-server/test/*.test.js\" \"packages/dsh-relay/test/*.test.js\""
   }
 }
