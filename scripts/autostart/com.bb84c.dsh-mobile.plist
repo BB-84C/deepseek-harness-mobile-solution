@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- macOS launchd agent — starts the resident dsh mobile service at login.
+     Install: cp to ~/Library/LaunchAgents/com.bb84c.dsh-mobile.plist
+              launchctl load ~/Library/LaunchAgents/com.bb84c.dsh-mobile.plist
+     Edit the dsh path (default /opt/homebrew/bin/dsh) if needed. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.bb84c.dsh-mobile</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/dsh</string>
+        <string>--profile</string>
+        <string>mobile</string>
+        <string>service</string>
+        <string>start</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

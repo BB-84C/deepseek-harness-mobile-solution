@@ -196,7 +196,7 @@ update                        升级两个插件（转发 dsh plugin update）�
 | M2 | dsh-mobile-server 插件 | gateway 反代 + 设备认证 + tailscale 绑定 + 常驻服务联调 | 🔄 gateway 实现中（subagent） |
 | M3 | relay + 隧道 | dsh-relay 服务 + 实例隧道客户端 + 目录/多路复用 | ⬜ |
 | M4 | 设备配对与安全加固 | 配对码兑换、哈希存储、撤销踢会话、限速、文档化威胁模型 | ⬜ |
-| M5 | 部署与文档 | tailscale/VPS relay 部署脚本与教程、插件安装说明、三平台自启模板 | ⬜ |
+| M5 | 部署与文档 | tailscale/VPS relay 部署脚本与教程、插件安装说明、三平台自启模板 | 🔄 文档/脚本已写，实测待 M7 |
 | M6 | 移动 UI/UX specs | mobile-web / mobile-app（Android+iOS）specs（交其他 agent） | ⬜ |
 | M7 | 端到端验收 | 本机 tailscale P2P 实测 + relay 模拟实测；README 完善；发布前检查 | ⬜ |
 

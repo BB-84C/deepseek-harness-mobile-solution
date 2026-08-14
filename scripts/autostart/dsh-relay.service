@@ -1,0 +1,18 @@
+# systemd unit for the dsh-relay on the VPS (root-managed).
+# Install: edit paths, cp to /etc/systemd/system/dsh-relay.service, then
+#   systemctl daemon-reload && systemctl enable --now dsh-relay
+[Unit]
+Description=dsh-relay — DeepSeek Harness mobile relay (fan-in)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=dsh-relay
+WorkingDirectory=/opt/dsh-relay
+ExecStart=/usr/bin/node /opt/dsh-relay/packages/dsh-relay/bin/relay.js --port 4097 --data-dir /var/lib/dsh-relay
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
