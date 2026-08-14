@@ -1,0 +1,7 @@
+# The dsh-mobile-server bundle patch: the mobile gateway inside the resident
+# `web` profile. One row; the plugin is fully inert unless the process was
+# launched by `dsh --profile mobile service start` (env DSH_MOBILE_INSTANCE=1),
+# so ordinary `dsh web` runs are untouched.
+- insert:
+    - id: mobile-gateway
+      name: '@bb-84c/dsh-mobile-server/startup'

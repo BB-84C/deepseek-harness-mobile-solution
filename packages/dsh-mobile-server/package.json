@@ -1,0 +1,30 @@
+{
+  "name": "@bb-84c/dsh-mobile-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Mobile gateway plugin for DeepSeek Harness (dsh): device-authenticated reverse proxy in front of the official dsh web (loopback), plus tailscale binding and the VPS relay tunnel client.",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    "./startup": "./src/startup.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src/startup.js",
+    "src/gateway.js",
+    "src/relay-tunnel.js",
+    "cordis.patch.yml"
+  ],
+  "dependencies": {
+    "@bb-84c/dsh-mobile-common": "workspace:*"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

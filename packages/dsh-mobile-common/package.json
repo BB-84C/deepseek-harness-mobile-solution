@@ -1,0 +1,14 @@
+{
+  "name": "@bb-84c/dsh-mobile-common",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Shared business modules for the dsh mobile solution plugins (home/config/service/tailscale/devices/url/doctor). Plain Node ESM, no dsh imports, no runtime dependencies.",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    "./*": "./src/*"
+  }
+}

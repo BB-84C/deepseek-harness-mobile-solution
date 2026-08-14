@@ -10,7 +10,7 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureMobileDirs, logsDir, resolveMobileHome } from "./home.js";
-import { loadConfig, saveConfig, setConfig } from "./config.js";
+import { loadConfig, saveConfig, setConfigValue, getConfigValue } from "./config.js";
 import * as tailscale from "./tailscale.js";
 import * as service from "./service.js";
 import * as devices from "./devices.js";
@@ -24,6 +24,13 @@ const INSTALLER = join(REPO_ROOT, "scripts", "install-mobile.mjs");
 
 function fail(message) {
   throw new Error(message);
+}
+
+/** Load config with defaults; print validation problems as warnings. */
+function mustConfig() {
+  const loaded = loadConfig();
+  if (loaded.errors.length > 0) console.warn(`config: ${loaded.errors.join("; ")}`);
+  return loaded.config;
 }
 
 /** Unique, order-preserving, empty-free. */
@@ -74,7 +81,7 @@ async function cmdUninstall() {
 }
 
 async function cmdStatus() {
-  const config = loadConfig();
+  const config = mustConfig();
   ensureMobileDirs();
   console.log(`mobile home : ${resolveMobileHome()}`);
   console.log(`mode        : ${config.mode}`);
@@ -117,7 +124,7 @@ async function cmdStatus() {
 async function cmdService(args) {
   const [action, nRaw] = args;
   const n = nRaw === undefined ? 50 : Number.parseInt(nRaw, 10);
-  const config = loadConfig();
+  const config = mustConfig();
   ensureMobileDirs();
   const logPath = join(logsDir(), "service.log");
 
@@ -211,7 +218,7 @@ async function cmdTailscale(args) {
 
 async function cmdRelay(args, options) {
   const [action, relayUrl] = args;
-  const config = loadConfig();
+  const config = mustConfig();
   switch (action) {
     case "connect": {
       if (!relayUrl) fail("connect needs the relay URL: dsh --profile mobile relay connect wss://relay.example.com --token <t>");
@@ -281,7 +288,7 @@ async function relayTunnelState() {
 
 async function cmdDevice(args, options) {
   const [action, id] = args;
-  const config = loadConfig();
+  const config = mustConfig();
   switch (action) {
     case "pair": {
       if (!options.name) fail("pair needs --name <device-name>");
@@ -313,7 +320,7 @@ async function cmdDevice(args, options) {
 }
 
 async function cmdUrl() {
-  const config = loadConfig();
+  const config = mustConfig();
   console.log(await mobileUrl(config));
   return 0;
 }
@@ -322,13 +329,12 @@ async function cmdConfig(args) {
   const [action, key, value] = args;
   switch (action) {
     case "show": {
-      console.log(JSON.stringify(loadConfig(), null, 2));
+      console.log(JSON.stringify(mustConfig(), null, 2));
       return 0;
     }
     case "get": {
       if (!key) fail("get needs a key: dsh --profile mobile config get <key>");
-      const config = loadConfig();
-      const current = key.split(".").reduce((node, part) => node?.[part], config);
+      const current = getConfigValue(mustConfig(), key);
       console.log(current === undefined ? "" : typeof current === "string" ? current : JSON.stringify(current));
       return 0;
     }
@@ -341,7 +347,7 @@ async function cmdConfig(args) {
           return value;
         }
       })();
-      const updated = setConfig(loadConfig(), key, parsed);
+      const updated = setConfigValue(mustConfig(), key, parsed);
       saveConfig(updated);
       console.log(`set ${key} = ${JSON.stringify(parsed)}`);
       return 0;
@@ -352,7 +358,7 @@ async function cmdConfig(args) {
 }
 
 async function cmdDoctor() {
-  const config = loadConfig();
+  const config = mustConfig();
   const findings = await diagnose({ config });
   let worst = 0;
   for (const finding of findings) {
