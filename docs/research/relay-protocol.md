@@ -39,10 +39,13 @@
 | 端点 | 方法 | 认证 | 说明 |
 | --- | --- | --- | --- |
 | `/relay/health` | GET | 无 | `{ok, uptime, instances}` |
-| `/relay/` | GET | 无 | owner 仪表盘（纯 HTML/JS） |
+| `/relay/` | GET | 无 | 实例选择页（公开目录 + owner 面板） |
 | `/relay/instance-tunnel` | Upgrade (WS) | instance token（query） | 实例出站隧道 |
-| `/relay/api/targets` | GET | client token \| owner cookie | `[{id,name,online,lastSeenMs}]` |
-| `/relay/instance/<id>/<path...>` | 任意 | 无（实例 gateway 自行认证） | 经隧道转发 |
+| `/relay/api/targets` | GET | 无（公开目录） | `[{id,name,online,lastSeenMs}]` |
+| `/instance/<id>/<path...>` | 任意 | 无（实例 gateway 自行认证） | **主入口**：种/刷新路由 cookie，转发去前缀后的路径 |
+| `/relay/instance/<id>/<path...>` | 任意 | 无（实例 gateway 自行认证） | 兼容别名：经隧道转发（不带 cookie） |
+| `/relay/api/select?instance=<id>[&next=<path>]` | GET | 无 | 种 `dsh_instance` 路由 cookie（HttpOnly, Path=/, 30 天）并 302 到 next |
+| 公开主机根路径（`/`、`/api/*`、`/mobile/*` 等） | 任意 | 无 | 按 `dsh_instance` cookie 路由到对应实例；无 cookie 302 到 `/relay/` |
 | `/relay/api/setup` | POST | bootstrap token | 一次性建立 owner 会话 |
 | `/relay/api/tokens` | GET/POST | owner cookie | 列出 / 创建凭据 |
 | `/relay/api/tokens/<hashPrefix>` | DELETE | owner cookie | 撤销凭据并踢活连接 |
@@ -62,10 +65,26 @@ Authorization: Bearer <client-token>
 
 - client token 为 32 字节随机数的 64 位 hex 小写。
 - relay 校验 `sha256(token)` 是否命中且未撤销。
-- client token 保护**目录**（`/relay/api/targets`）；owner 接口另需 owner 会话。
-- **转发路径不做 relay 认证**：`/relay/instance/<id>/...` 的凭据（`Authorization`
-  bearer 或实例 gateway 的会话 cookie）原样转发，由实例侧 gateway 校验——gateway
-  是 tailscale / relay 两种传输模式共同的设备认证边界，relay 只是传输。
+- **实例目录是公开的**：`/relay/api/targets` 只返回 `{id,name,online,lastSeenMs}`，
+  不泄露凭据；client token 目前仅用于可选的目录访问控制与
+  `dsh url relay <id>` 生成的直达链接（`/instance/<id>/...`）。
+- **转发路径不做 relay 认证**：`/relay/instance/<id>/...` 与 `/instance/<id>/...`
+  的凭据（`Authorization` bearer 或实例 gateway 的会话 cookie）原样转发，由实例侧
+  gateway 校验——gateway 是 tailscale / relay 两种传输模式共同的设备认证边界，
+  relay 只是传输。
+
+### 3.1.1 实例入口与路由 cookie
+
+- 客户端主入口是 **`https://<public-host>/instance/<id>/`**（不再使用多级通配子域；
+  免费 Cloudflare 证书只覆盖单层通配，多级子域 TLS 会握手失败）。
+- 访问 `/instance/<id>/<path...>` 时 relay 先**种/刷新路由 cookie**
+  `dsh_instance=<id>`（`HttpOnly; Path=/; Max-Age=2592000`，经
+  `X-Forwarded-Proto: https` 时追加 `Secure`），再把去前缀后的路径经隧道转发给实例。
+- 官方前端使用绝对路径（`/api/...`、`/mobile/...`），这些请求会落在公开主机根路径
+  上，relay 按 `dsh_instance` cookie 路由到对应实例；无 cookie 则 302 到 `/relay/`
+  选择页。
+- `dsh_instance` 是纯路由标记，**不是认证凭据**；实例侧 gateway 仍按自己的会话
+  cookie / 设备凭据认证。选错实例最多得到 401/404，不会跨实例读到数据。
 
 ### 3.2 owner（HttpOnly 会话 cookie）
 
@@ -166,8 +185,8 @@ Upgrade: websocket
 - `connection`、`keep-alive`、`proxy-*`、`te`、`trailer`、`transfer-encoding`、
   `upgrade`、`host`、`content-length`、请求侧 `x-relay-*`（防伪造 relay 追加的响应头）。
 - `authorization` **原样转发**：携带的是实例设备凭据，由实例侧 gateway 校验。
-- `cookie` 中的 `dsh_relay_owner=...` 会被剔除，其余 cookie（含实例 gateway 的
-  会话 cookie `dsh_mobile_sid`）原样转发。
+- `cookie` 中的 relay 私有 cookie（`dsh_relay_owner`、`dsh_instance`）会被剔除，
+  其余 cookie（含实例 gateway 的会话 cookie `dsh_mobile_sid`）原样转发。
 
 ## 7. 限速
 

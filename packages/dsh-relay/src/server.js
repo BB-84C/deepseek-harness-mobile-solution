@@ -29,6 +29,7 @@ const MAX_JSON_BODY = 64 * 1024 // cap API JSON bodies (setup / create token)
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000 // owner session expiry
 const TUNNEL_REGISTER_TIMEOUT_MS = 10_000 // tunnel registration handshake bound
 const OWNER_COOKIE = 'dsh_relay_owner'
+const INSTANCE_COOKIE = 'dsh_instance'
 const CHALLENGE_TTL_MS = 5 * 60 * 1000 // WebAuthn challenge lifetime
 const MAX_PASSKEY_BODY = 16 * 1024 // cap register/login-verify JSON bodies
 const OWNER_USER_ID = b64urlEncode(Buffer.from('dsh-relay-owner', 'utf8'))
@@ -189,10 +190,16 @@ async function readJson(req, maxBytes) {
   }
 }
 
-function stripOwnerCookie(cookieHeader) {
+function stripRelayCookies(cookieHeader) {
   const kept = String(cookieHeader).split(';')
     .map((s) => s.trim())
-    .filter((s) => s.length && !s.startsWith(OWNER_COOKIE + '='))
+    .filter((s) => {
+      if (!s.length) return false
+      // relay-private cookies never enter the tunnel
+      if (s.startsWith(OWNER_COOKIE + '=')) return false
+      if (s.startsWith(INSTANCE_COOKIE + '=')) return false
+      return true
+    })
   return kept.join('; ')
 }
 
@@ -206,7 +213,7 @@ function sanitizeHeaders(headers) {
     else if (v != null) out[k] = String(v)
   }
   if (out.cookie !== undefined) {
-    const stripped = stripOwnerCookie(out.cookie)
+    const stripped = stripRelayCookies(out.cookie)
     if (stripped) out.cookie = stripped
     else delete out.cookie
   }

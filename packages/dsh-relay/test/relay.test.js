@@ -433,7 +433,11 @@ describe('relay integration', () => {
       await waitFor(() => relay.registry.get(instanceId) !== null)
       const res = await request(base, '/instance/' + instanceId + '/api/hello?x=1', {
         method: 'POST',
-        headers: { host: 'relay.example.com', authorization: 'Bearer device-token' },
+        headers: {
+          host: 'relay.example.com',
+          authorization: 'Bearer device-token',
+          cookie: 'dsh_relay_owner=abc123; dsh_instance=other; dsh_mobile_sid=keepme',
+        },
         body: 'ping',
       })
       assert.strictEqual(res.status, 200)
@@ -444,6 +448,8 @@ describe('relay integration', () => {
       assert.strictEqual(body.method, 'POST')
       assert.strictEqual(body.url, '/api/hello?x=1')
       assert.strictEqual(Buffer.from(body.bodyBase64, 'base64').toString(), 'ping')
+      // relay-private cookies never enter the tunnel; device cookies pass through
+      assert.strictEqual(body.headers.cookie, 'dsh_mobile_sid=keepme')
     } finally {
       inst.close()
     }
