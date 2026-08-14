@@ -737,6 +737,12 @@ export function createRelayServer(options = {}) {
     if (opts.publicHost && typeof req.headers.host === 'string') {
       const host = req.headers.host.split(':')[0].toLowerCase()
       if (host === opts.publicHost.toLowerCase() && !pathname.startsWith('/relay/')) {
+        // The bare root IS the main menu (instance picker) — always, with or
+        // without a routing cookie. Entering a machine is a deliberate choice
+        // from the menu via /instance/<id>/.
+        if (pathname === '/') {
+          return sendHtml(res, 200, DASHBOARD_HTML.replaceAll('__WILDCARD__', JSON.stringify(opts.wildcardHost)))
+        }
         const selected = parseCookies(req)['dsh_instance'] || null
         if (selected && /^[a-z0-9-]{1,64}$/.test(selected)) {
           return handleForward(req, res, selected, u.pathname + u.search, null)
@@ -1083,7 +1089,7 @@ const DASHBOARD_HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>dsh-relay owner</title>
+<title>dsh hosts</title>
 <style>
 :root { color-scheme: dark; }
 * { box-sizing: border-box; }
@@ -1107,7 +1113,7 @@ form { display: flex; gap: 8px; align-items: center; margin: 12px 0; flex-wrap: 
 </head>
 <body>
 <header>
-  <h1>dsh-relay</h1>
+  <h1>dsh hosts</h1>
   <span id="status">…</span>
   <button id="logout" style="display:none">Log out</button>
 </header>

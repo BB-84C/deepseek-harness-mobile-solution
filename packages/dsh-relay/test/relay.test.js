@@ -319,7 +319,7 @@ describe('relay integration', () => {
     assert.strictEqual(res.status, 200)
     assert.ok(res.headers['content-type'].includes('text/html'))
     const html = res.text()
-    assert.ok(html.includes('dsh-relay'))
+    assert.ok(html.includes('dsh hosts'))
     assert.ok(html.includes('createToken'))
   })
 
@@ -502,8 +502,19 @@ describe('relay integration', () => {
       assert.strictEqual(res.status, 200)
       assert.strictEqual(res.json().url, '/api/session.list')
 
-      // without the cookie, root paths redirect to the picker
-      const noCookie = await request(base, '/', { headers: { host: 'relay.example.com' } })
+      // the BARE root is the main menu (instance picker) — always, even with
+      // a routing cookie; entering an instance is a deliberate menu choice
+      const rootNoCookie = await request(base, '/', { headers: { host: 'relay.example.com' } })
+      assert.strictEqual(rootNoCookie.status, 200)
+      assert.ok(rootNoCookie.text().includes('Instances'))
+      const rootWithCookie = await request(base, '/', {
+        headers: { host: 'relay.example.com', cookie: 'dsh_instance=' + instanceId },
+      })
+      assert.strictEqual(rootWithCookie.status, 200)
+      assert.ok(rootWithCookie.text().includes('Instances'))
+
+      // other root-space paths WITHOUT a cookie still redirect to the picker
+      const noCookie = await request(base, '/mobile/auth', { headers: { host: 'relay.example.com' } })
       assert.strictEqual(noCookie.status, 302)
       assert.strictEqual(noCookie.headers.location, '/relay/')
     } finally {

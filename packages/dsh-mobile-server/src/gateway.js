@@ -534,6 +534,17 @@ export function createGateway(deps = {}) {
     return 'Sign in failed.';
   }
 
+  /**
+   * Redirect targets for THIS transport. In relay mode every gateway redirect
+   * must stay inside the instance's URL space (/instance/<id>/...) so the
+   * phone never lands on the relay root — the root is the instance picker
+   * menu, not an instance.
+   */
+  function entryPath(pathname) {
+    if (effectiveConfig.mode !== 'relay') return pathname;
+    return `/instance/${encodeURIComponent(instanceId())}${pathname}`;
+  }
+
   function renderLogin(res, { next = '', error = '', status = 200 } = {}) {
     const nextVal = safeNext(next) === '/' ? '' : escapeHtml(safeNext(next));
     const errorHtml = error ? `<p class="error">${escapeHtml(error)}</p>` : '';
@@ -614,7 +625,7 @@ export function createGateway(deps = {}) {
       if (result.rawToken) payload.token = result.rawToken; // delivered once, app flow
       return json(res, 200, payload);
     }
-    return redirect(res, safeNext(body.next || ''));
+    return redirect(res, entryPath(safeNext(body.next || '')));
   }
 
   async function handlePair(req, res, url) {
@@ -626,12 +637,12 @@ export function createGateway(deps = {}) {
       const body = parseBody(req, await readBody(req));
       code = body.code;
     }
-    if (!code) return redirect(res, '/mobile/auth?error=missing');
+    if (!code) return redirect(res, entryPath('/mobile/auth?error=missing'));
 
     const redeemed = redeemCode(code);
     if (!redeemed) {
       audit('pair_fail', { ip, code });
-      return redirect(res, '/mobile/auth?error=pair');
+      return redirect(res, entryPath('/mobile/auth?error=pair'));
     }
     const { sid, maxAgeSec } = createSession(redeemed.device.id);
     setSessionCookie(req, res, sid, maxAgeSec);
@@ -647,7 +658,7 @@ export function createGateway(deps = {}) {
         expiresAt: null,
       });
     }
-    return redirect(res, '/');
+    return redirect(res, entryPath('/'));
   }
 
   function handleLogout(req, res) {
@@ -840,7 +851,7 @@ export function createGateway(deps = {}) {
       if (pathname.startsWith('/api') || wantsJson(req)) {
         return json(res, 401, { error: 'unauthorized' });
       }
-      return redirect(res, `/mobile/auth?next=${encodeURIComponent(req.url)}`);
+      return redirect(res, entryPath(`/mobile/auth?next=${encodeURIComponent(req.url)}`));
     }
 
     // Session-live guard: opening/resuming a session whose log another dsh

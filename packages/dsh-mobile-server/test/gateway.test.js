@@ -487,7 +487,7 @@ test('relay mode presents proxied requests as loopback (host rewritten, origin s
     config: {
       mode: 'relay',
       gatewayPort: 3084,
-      relay: { url: 'https://dsh.bb84.ai' },
+      relay: { url: 'https://dsh.bb84.ai', instanceId: 'woody' },
       tailscale: {},
       auth: { sessionTtlDays: 30 },
     },
@@ -497,6 +497,12 @@ test('relay mode presents proxied requests as loopback (host rewritten, origin s
   });
   const startedR = await gwR.start();
   try {
+    // relay-mode redirects stay inside the instance's URL space so the phone
+    // never lands on the relay root (the picker menu)
+    const unauth = await request('/', {}, startedR.port);
+    assert.strictEqual(unauth.status, 302);
+    assert.strictEqual(unauth.headers.location, '/instance/woody/mobile/auth?next=%2F');
+
     const pending = store.issuePairing({ name: 'relay-phone' });
     const pairRes = await request('/mobile/pair', {
       method: 'POST',
@@ -504,6 +510,12 @@ test('relay mode presents proxied requests as loopback (host rewritten, origin s
       body: JSON.stringify({ code: pending.pairingCode }),
     }, startedR.port);
     const token = pairRes.json().token;
+
+    // browser pairing flow redirects to the instance entry, not the root
+    const pending2 = store.issuePairing({ name: 'relay-phone-2' });
+    const browserPair = await request(`/mobile/pair?code=${pending2.pairingCode}`, {}, startedR.port);
+    assert.strictEqual(browserPair.status, 302);
+    assert.strictEqual(browserPair.headers.location, '/instance/woody/');
 
     // browser-like request: Origin present, like the phone over the relay
     const proxied = await request('/api/host.describe', {
