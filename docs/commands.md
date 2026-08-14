@@ -9,7 +9,7 @@ the **host**; the phone is only a frontend.
 | --- | --- |
 | `install` | Install/repair the plugins into the `mobile` + `web` profiles (idempotent) |
 | `uninstall` | Remove the plugins from both profiles (keeps your data) |
-| `service start\|stop\|restart\|status\|logs [n]` | Manage the machine's single dsh web (detached, kill-safe, one-instance guard). `start --wait` / `restart --wait`: when another dsh web holds the port, wait for it to free and start automatically |
+| `service start\|stop\|restart\|status\|logs [n]` | Manage the machine's single dsh web (detached, kill-safe, one-instance guard) |
 | `tailscale status\|ip\|connect\|ping [host]` | Tailscale transport: state, address, up, reachability |
 | `tailscale serve status\|on\|off` | HTTPS on your MagicDNS name (Let's Encrypt cert via Tailscale) |
 | `relay connect <url> --token <t> [--id] [--name]` | Register this machine with your VPS relay (fan-in) |

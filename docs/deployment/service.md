@@ -56,18 +56,10 @@ sessions** — and `service start` enforces it for you:
   `webPort` (default 3080) and becomes the machine's single dsh web. Local
   usage is unchanged (`http://127.0.0.1:3080/`); the phone live-streams every
   session — past and running — from that one instance.
-- **Port occupied by another process** (your old dsh web): a running dsh
-  instance cannot gain the mobile gateway at runtime — dsh bakes the trust
-  fence and plugin activation in at boot, so there is no way to "attach" into
-  a live process (this is a dsh core behavior, unlike opencode's attach).
-  `service start` therefore offers two paths:
-  - `dsh --profile mobile service start --wait` — keep it running in a
-    terminal; the resident instance starts **automatically the moment the old
-    instance closes**. Long-running tasks finish on their own schedule; you
-    close the old web when convenient, and the phone comes up by itself.
-  - plain `service start` — prints the same guidance and exits.
-  Nothing is touched and nothing is lost: sessions live on disk under
-  `$DSH_HOME/sessions` and the resident instance lists all of them.
+- **Port occupied by another process** (your old dsh web): `service start`
+  **refuses with exact instructions** — stop that instance, then re-run the
+  same command. Nothing is touched and nothing is lost: sessions live on disk
+  under `$DSH_HOME/sessions` and the resident instance lists all of them.
 
 That is the whole model — one command, no "attach" step, no flags. To hand
 the machine back to a different launcher later, `service stop` frees the port

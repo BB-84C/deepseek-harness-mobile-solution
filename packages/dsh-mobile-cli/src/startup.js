@@ -40,11 +40,9 @@ const SUBCOMMANDS = [
   },
   {
     name: "service",
-    description: "manage the resident dsh web instance (a) — start [--wait] | stop | restart [--wait] | status | logs [n]",
+    description: "manage the resident dsh web instance (a) — start | stop | restart | status | logs [n]",
     argsDesc: "<action> [n]",
-    options: [
-      ["--wait", "when the port is held by another dsh web, wait for it to free and then start automatically"],
-    ],
+    options: [],
   },
   {
     name: "tailscale",
