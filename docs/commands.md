@@ -10,6 +10,7 @@ the **host**; the phone is only a frontend.
 | `install` | Install/repair the plugins into the `mobile` + `web` profiles (idempotent) |
 | `uninstall` | Remove the plugins from both profiles (keeps your data) |
 | `attach` | **One-instance mode**: make the resident dsh web your primary instance on 3080 — one command, no flags |
+| `detach` | Exit one-instance mode: stop the resident instance, free 3080, restore the previous webPort |
 | `service start\|stop\|restart\|status\|logs [n]` | Manage the resident dsh web (detached, kill-safe: never touches non-mobile dsh) |
 | `tailscale status\|ip\|connect\|ping [host]` | Tailscale transport: state, address, up, reachability |
 | `tailscale serve status\|on\|off` | HTTPS on your MagicDNS name (Let's Encrypt cert via Tailscale) |

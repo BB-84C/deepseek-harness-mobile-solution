@@ -246,3 +246,22 @@ deepseek-harness-mobile-solution/
 - **网关即新增攻击面**：认证先于一切路由、限速、审计日志；安全模型文档化（docs/deployment 内含 threat model 节）。
 - **误杀非 mobile 实例**：pidfile + 创建时间 + 启动令牌三重校验（用户红线要求）。
 - **沙箱限制**：本 agent 测试 tailscale/gh/git 网络类命令可能被沙箱挡，按需升级重试。
+
+## 8. 事故记录与教训
+
+**2026-08-14 session 日志损坏事故（session-0cee4631，已修复）**
+
+- 现象：`dsh --profile mobile attach` 与 `dsh web` 均报
+  `corrupt session log: seq gap in committed region at line 23736 (expected 303109, got 303099)`，
+  session 完全无法加载。
+- 根因：同一 session 的 JSONL 日志被**两个 dsh 实例并发 append**（常驻 web gateway 与处理手机
+  远程消息的另一个 session 实例），两者 seq 计数器不同步。其一以 create-with-seed 路径构造
+  （日志中留下 `session/end-seed`@seq 303099），其写入的 10 行块（当时 msg1 因
+  `MISSING_CREDENTIAL` 失败的 turn 18）与常驻实例 seq 303099..363790 的 6 万事件尾段在
+  提交区重叠，造成 seq 回退。
+- 修复：删除重叠的 10 行陈旧块、保留常驻实例的完整尾段；修复后 363,791 事件 seq 连续，
+  通过 dsh 官方 `Session.fromRestore` 全量校验（26 turns 完整）。损失仅为 msg1 失败尝试的
+  10 个事件，msg2 及之后的全部内容保留。原始损坏文件与取证材料在工作区 `.recovery/`（gitignored）。
+- 教训（并入 M2/M4 加固项）：**移动链路必须保证每 session 单写者**——远程消息一律通过常驻
+  gateway 的 inbox splice 路径注入，禁止对同一 session 再开第二个可写实例（`attach` 与
+  gateway 不得同时写同一 session）。后续在 dsh-mobile-server 增加防线（单写者锁 / 写前 seq 校验）。

@@ -29,3 +29,6 @@ Thumbs.db
 .m7-*
 .relay-*
 *.out
+
+# Session-log corruption forensics (2026-08-14 incident, machine-specific)
+.recovery/

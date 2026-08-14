@@ -69,6 +69,14 @@ the phone URL is unchanged.
 If 3080 is still occupied, `attach` refuses with a clear message and nothing
 else is touched; stop the old instance and re-run.
 
+`attach` never leaves orphans: the instance it starts on 3080 is the same
+tracked resident instance (pidfile + sidecar), so `service stop` always works
+on it. To hand the port back to your old launcher, use the symmetric exit:
+
+```sh
+dsh --profile mobile detach     # stops the instance, frees 3080, restores webPort
+```
+
 The resident-service model (`service start`) remains the right choice when the
 machine has NO other dsh web: the resident instance is then the single owner
 of all sessions and the phone streams them live from the first prompt.

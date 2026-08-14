@@ -96,6 +96,12 @@ const SUBCOMMANDS = [
     argsDesc: "",
     options: [],
   },
+  {
+    name: "detach",
+    description: "exit one-instance mode: stop the resident instance, free 3080, restore the previous webPort",
+    argsDesc: "",
+    options: [],
+  },
 ];
 
 /**

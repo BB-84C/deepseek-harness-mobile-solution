@@ -7,9 +7,10 @@
  */
 
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureMobileDirs, logsDir, resolveMobileHome } from "@bb-84c/dsh-mobile-common/home.js";
+import { ensureMobileDirs, logsDir, resolveMobileHome, mobilePaths } from "@bb-84c/dsh-mobile-common/home.js";
 import { loadConfig, saveConfig, setConfigValue, getConfigValue } from "@bb-84c/dsh-mobile-common/config.js";
 import * as tailscale from "@bb-84c/dsh-mobile-common/tailscale.js";
 import * as service from "@bb-84c/dsh-mobile-common/service.js";
@@ -37,6 +38,37 @@ function mustConfig() {
 /** Unique, order-preserving, empty-free. */
 function unique(values) {
   return [...new Set(values.filter((v) => v !== "" && v !== undefined && v !== null))];
+}
+
+// ── attach/detach state (data/attach-state.json) ────────────────────────────
+
+function attachStatePath() {
+  return join(mobilePaths().dataDir, "attach-state.json");
+}
+
+function writeAttachState(state) {
+  try {
+    fs.mkdirSync(mobilePaths().dataDir, { recursive: true });
+    fs.writeFileSync(attachStatePath(), JSON.stringify(state, null, 2), "utf8");
+  } catch {
+    // best effort
+  }
+}
+
+function readAttachState() {
+  try {
+    return JSON.parse(fs.readFileSync(attachStatePath(), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function clearAttachState() {
+  try {
+    fs.unlinkSync(attachStatePath());
+  } catch {
+    // absent
+  }
 }
 
 /** Compute the --trusted-host authorities for the resident web instance:
@@ -423,6 +455,7 @@ async function cmdAttach() {
 
   let config = mustConfig();
   if (config.webPort !== 3080) {
+    writeAttachState({ previousWebPort: config.webPort, attachedAt: Date.now() });
     config = setConfigValue(config, 'webPort', 3080);
     saveConfig(config);
     console.log('webPort set to 3080 (one-instance mode)');
@@ -444,6 +477,25 @@ async function cmdAttach() {
   console.log('  local : http://127.0.0.1:3080/');
   console.log(`  remote: ${await mobileUrl(fresh)}`);
   console.log('pair once on the phone; every session (past and live) is right there.');
+  return 0;
+}
+
+async function cmdDetach() {
+  // Exit one-instance mode: stop the resident instance (frees 3080) and
+  // restore the pre-attach webPort so the old launcher can take the port back.
+  const config = mustConfig();
+  const stopped = service.stopService({ config });
+  if (stopped.error) {
+    console.error(`refusing to stop: ${stopped.error}`);
+    return 1;
+  }
+  const state = readAttachState();
+  if (state?.previousWebPort && state.previousWebPort !== config.webPort) {
+    saveConfig(setConfigValue(loadConfig().config, 'webPort', state.previousWebPort));
+    console.log(`webPort restored to ${state.previousWebPort}`);
+  }
+  clearAttachState();
+  console.log('detached — port 3080 is free again; you can relaunch your other dsh web.');
   return 0;
 }
 
@@ -474,6 +526,7 @@ const COMMANDS = {
   doctor: cmdDoctor,
   update: cmdUpdate,
   attach: cmdAttach,
+  detach: cmdDetach,
 };
 
 export async function runCommand(name, args, options) {
