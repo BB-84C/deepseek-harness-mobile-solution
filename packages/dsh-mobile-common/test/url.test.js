@@ -15,9 +15,14 @@ test('tailscale mode falls back to tailnet IP', () => {
   assert.equal(buildAccessUrl({ config, tailscaleHostname: null, tailscaleIp: '100.1.2.3' }), 'http://100.1.2.3:3081/');
 });
 
-test('relay mode builds https instance URL and strips trailing slash/scheme', () => {
-  const config = { mode: 'relay', relay: { url: 'https://relay.example.com/', instanceId: 'inst-1' } };
+test('relay mode builds the /instance/<id> path URL', () => {
+  const config = { mode: 'relay', relay: { url: 'https://relay.example.com/', instanceId: 'Inst-1' } };
   assert.equal(buildAccessUrl({ config }), 'https://relay.example.com/instance/inst-1/');
+});
+
+test('relay mode without an instance id points at the picker', () => {
+  const config = { mode: 'relay', relay: { url: 'https://relay.example.com/', instanceId: '' } };
+  assert.equal(buildAccessUrl({ config }), 'https://relay.example.com/relay/');
 });
 
 test('relayBaseUrl strips scheme and slashes', () => {

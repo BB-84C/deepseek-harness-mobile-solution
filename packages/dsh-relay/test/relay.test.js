@@ -265,7 +265,7 @@ describe('relay integration', () => {
   let instanceId
 
   before(async () => {
-    relay = createRelayServer({ port: 0, dataDir: await tmpDataDir() })
+    relay = createRelayServer({ port: 0, dataDir: await tmpDataDir(), wildcardHost: '.inst.example.com', publicHost: 'relay.example.com' })
     await relay.start()
     base = 'http://127.0.0.1:' + relay.port
     wsBase = 'ws://127.0.0.1:' + relay.port
@@ -390,7 +390,9 @@ describe('relay integration', () => {
   })
 
   test('auth failures (401/403)', async () => {
-    assert.strictEqual((await request(base, '/relay/api/targets')).status, 401)
+    // The directory is public (the picker page needs it without credentials);
+    // instance access itself is authenticated by each instance's gateway.
+    assert.strictEqual((await request(base, '/relay/api/targets')).status, 200)
     // The proxy path is transport-only (the instance gateway authenticates):
     // an unknown instance answers 404 even without any relay credential.
     assert.strictEqual((await request(base, '/relay/instance/x/y')).status, 404)
@@ -401,12 +403,73 @@ describe('relay integration', () => {
       })).status,
       403,
     )
-    assert.strictEqual(
-      (await request(base, '/relay/api/targets', {
-        headers: { authorization: 'Bearer deadbeef' },
-      })).status,
-      401,
-    )
+  })
+
+  test('wildcard subdomain routes to the instance with the full path', async () => {
+    const inst = await createFakeInstance({
+      url: wsBase, token: instanceToken, id: instanceId, name: 'my-instance',
+    })
+    try {
+      await waitFor(() => relay.registry.get(instanceId) !== null)
+      const res = await request(base, '/api/hello?x=1', {
+        headers: { host: instanceId + '.inst.example.com', authorization: 'Bearer device-token' },
+      })
+      assert.strictEqual(res.status, 200)
+      assert.strictEqual(res.headers['x-relay-instance'], instanceId)
+      const body = res.json()
+      assert.strictEqual(body.method, 'GET')
+      assert.strictEqual(body.url, '/api/hello?x=1')
+      assert.strictEqual(body.headers.authorization, 'Bearer device-token')
+    } finally {
+      inst.close()
+    }
+  })
+
+  test('/instance/<id> routes, sets the routing cookie, and forwards the path minus the prefix', async () => {
+    const inst = await createFakeInstance({
+      url: wsBase, token: instanceToken, id: instanceId, name: 'my-instance',
+    })
+    try {
+      await waitFor(() => relay.registry.get(instanceId) !== null)
+      const res = await request(base, '/instance/' + instanceId + '/api/hello?x=1', {
+        method: 'POST',
+        headers: { host: 'relay.example.com', authorization: 'Bearer device-token' },
+        body: 'ping',
+      })
+      assert.strictEqual(res.status, 200)
+      const cookie = /dsh_instance=([^;]+)/.exec(res.headers['set-cookie'] ?? '')
+      assert.ok(cookie, 'routing cookie set')
+      assert.strictEqual(cookie[1], instanceId)
+      const body = res.json()
+      assert.strictEqual(body.method, 'POST')
+      assert.strictEqual(body.url, '/api/hello?x=1')
+      assert.strictEqual(Buffer.from(body.bodyBase64, 'base64').toString(), 'ping')
+    } finally {
+      inst.close()
+    }
+  })
+
+  test('cookie routing on the public host forwards root paths to the selected instance', async () => {
+    const inst = await createFakeInstance({
+      url: wsBase, token: instanceToken, id: instanceId, name: 'my-instance',
+    })
+    try {
+      await waitFor(() => relay.registry.get(instanceId) !== null)
+      // with the cookie, an ABSOLUTE path like the official frontend's /api
+      // calls lands on the instance with the full path
+      const res = await request(base, '/api/session.list', {
+        headers: { host: 'relay.example.com', cookie: 'dsh_instance=' + instanceId, authorization: 'Bearer t' },
+      })
+      assert.strictEqual(res.status, 200)
+      assert.strictEqual(res.json().url, '/api/session.list')
+
+      // without the cookie, root paths redirect to the picker
+      const noCookie = await request(base, '/', { headers: { host: 'relay.example.com' } })
+      assert.strictEqual(noCookie.status, 302)
+      assert.strictEqual(noCookie.headers.location, '/relay/')
+    } finally {
+      inst.close()
+    }
   })
 
   test('authorization header passes verbatim to the instance', async () => {

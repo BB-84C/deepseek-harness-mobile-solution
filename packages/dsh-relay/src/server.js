@@ -224,6 +224,17 @@ export function createRelayServer(options = {}) {
     rpName: options.rpName ?? 'dsh-relay',
     rpId: options.rpId ?? null, // null -> derive from request host
     origin: options.origin ?? null, // null -> derive from request headers
+    // e.g. '.dsh.bb84.ai': requests to <instance-id>.dsh.bb84.ai route to that
+    // instance with the FULL path (no /relay/instance prefix) — the official
+    // web frontend's absolute /api paths then work unchanged. OPTIONAL: needs
+    // DNS + edge certs that cover multi-level subdomains (free Cloudflare
+    // Universal SSL does NOT); the cookie router below is the primary mode.
+    wildcardHost: options.wildcardHost ?? '',
+    // e.g. 'dsh.bb84.ai': the public hostname of the picker. Non-/relay paths
+    // on this host route by the `dsh_instance` cookie (set by the picker's
+    // /relay/api/select links) — instance-as-origin behavior on ONE hostname,
+    // fully compatible with the official frontend and free Cloudflare.
+    publicHost: options.publicHost ?? '',
   }
 
   const tokenStore = new TokenStore(path.join(opts.dataDir, 'tokens.json'))
@@ -684,6 +695,66 @@ export function createRelayServer(options = {}) {
 
     if (method === 'OPTIONS') return sendEmpty(res, 204)
 
+    // Primary instance entry: /instance/<id>/<path...>. Sets (refreshes) the
+    // routing cookie, then forwards the path minus the prefix — the official
+    // frontend's later ABSOLUTE /api and /mobile paths ride the cookie.
+    if (pathname.startsWith('/instance/')) {
+      const after = pathname.slice('/instance/'.length)
+      const slash = after.indexOf('/')
+      const id = decodeURIComponent(slash === -1 ? after : after.slice(0, slash))
+      if (!/^[a-z0-9-]{1,64}$/.test(id)) return sendJson(res, 400, { error: 'bad-instance' })
+      const secure = req.headers['x-forwarded-proto'] === 'https'
+      res.setHeader(
+        'set-cookie',
+        `dsh_instance=${id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000${secure ? '; Secure' : ''}`,
+      )
+      const restPath = slash === -1 ? '/' : after.slice(slash)
+      return handleForward(req, res, id, restPath + u.search, null)
+    }
+
+    // Wildcard subdomain routing (OPTIONAL extra): <instance-id><wildcardHost>
+    // -> that instance, full path forwarded (no prefix stripping).
+    if (opts.wildcardHost && typeof req.headers.host === 'string') {
+      const host = req.headers.host.split(':')[0].toLowerCase()
+      const suffix = opts.wildcardHost.toLowerCase()
+      if (host.length > suffix.length && host.endsWith(suffix)) {
+        const id = host.slice(0, -suffix.length)
+        if (/^[a-z0-9-]{1,64}$/.test(id)) {
+          return handleForward(req, res, id, u.pathname + u.search, null)
+        }
+      }
+    }
+
+    // Cookie routing on the public host: /relay/* stays relay-local; everything
+    // else routes to the instance named by the dsh_instance cookie.
+    if (opts.publicHost && typeof req.headers.host === 'string') {
+      const host = req.headers.host.split(':')[0].toLowerCase()
+      if (host === opts.publicHost.toLowerCase() && !pathname.startsWith('/relay/')) {
+        const selected = parseCookies(req)['dsh_instance'] || null
+        if (selected && /^[a-z0-9-]{1,64}$/.test(selected)) {
+          return handleForward(req, res, selected, u.pathname + u.search, null)
+        }
+        res.writeHead(302, { location: '/relay/' })
+        res.end()
+        return
+      }
+    }
+
+    if (method === 'GET' && pathname === '/relay/api/select') {
+      const id = u.searchParams.get('instance') || ''
+      if (!/^[a-z0-9-]{1,64}$/.test(id)) return sendJson(res, 400, { error: 'bad-instance' })
+      let next = u.searchParams.get('next') || '/instance/' + encodeURIComponent(id) + '/'
+      if (!next.startsWith('/') || next.startsWith('//')) next = '/'
+      const secure = req.headers['x-forwarded-proto'] === 'https'
+      res.setHeader(
+        'set-cookie',
+        `dsh_instance=${id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000${secure ? '; Secure' : ''}`,
+      )
+      res.writeHead(302, { location: next })
+      res.end()
+      return
+    }
+
     if (method === 'GET' && pathname === '/relay/health') {
       return sendJson(res, 200, {
         ok: true,
@@ -693,7 +764,7 @@ export function createRelayServer(options = {}) {
     }
 
     if (method === 'GET' && (pathname === '/relay/' || pathname === '/relay')) {
-      return sendHtml(res, 200, DASHBOARD_HTML)
+      return sendHtml(res, 200, DASHBOARD_HTML.replaceAll('__WILDCARD__', JSON.stringify(opts.wildcardHost)))
     }
 
     if (method === 'POST' && pathname === '/relay/api/setup') {
@@ -737,8 +808,9 @@ export function createRelayServer(options = {}) {
     }
 
     if (method === 'GET' && pathname === '/relay/api/targets') {
-      const auth = authenticateClientOrOwner(req)
-      if (!auth) return sendJson(res, 401, { error: 'unauthorized' })
+      // Public directory: ids + names + online state only. The picker page
+      // needs it without credentials; instance access itself is authenticated
+      // by each instance's gateway.
       return sendJson(res, 200, registry.list())
     }
 
@@ -1015,6 +1087,15 @@ form { display: flex; gap: 8px; align-items: center; margin: 12px 0; flex-wrap: 
   <button id="logout" style="display:none">Log out</button>
 </header>
 
+<section id="picker">
+  <h2>Instances</h2>
+  <p style="color:#8b949e;font-size:13px">Pick a machine — device authentication happens on the machine itself.</p>
+  <table id="instances">
+    <thead><tr><th>ID</th><th>Name</th><th>Online</th><th>Last seen</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</section>
+
 <section id="setup" style="display:none">
   <h2>Set up owner access</h2>
   <p>Enter the one-time bootstrap token printed by the relay at startup.</p>
@@ -1027,12 +1108,6 @@ form { display: flex; gap: 8px; align-items: center; margin: 12px 0; flex-wrap: 
 </section>
 
 <section id="panel" style="display:none">
-  <h2>Instances</h2>
-  <table id="instances">
-    <thead><tr><th>ID</th><th>Name</th><th>Online</th><th>Last seen</th></tr></thead>
-    <tbody></tbody>
-  </table>
-
   <h2>Tokens</h2>
   <form id="createToken">
     <input id="label" placeholder="label" size="20">
@@ -1053,6 +1128,7 @@ form { display: flex; gap: 8px; align-items: center; margin: 12px 0; flex-wrap: 
 </section>
 
 <script>
+const WILDCARD_HOST = __WILDCARD__;
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -1087,7 +1163,8 @@ async function loadTargets() {
     const tr = document.createElement('tr');
     const last = t.lastSeenMs ? new Date(t.lastSeenMs).toLocaleString() : '-';
     const state = t.online ? '<span class="on">● online</span>' : '<span class="off">○ offline</span>';
-    tr.innerHTML = '<td>' + esc(t.id) + '</td><td>' + esc(t.name) + '</td><td>' + state + '</td><td>' + last + '</td>';
+    const idCell = '<a href="/instance/' + esc(t.id) + '/" style="color:#7ee787">' + esc(t.id) + '</a>';
+    tr.innerHTML = '<td>' + idCell + '</td><td>' + esc(t.name) + '</td><td>' + state + '</td><td>' + last + '</td>';
     tbody.appendChild(tr);
   }
 }
@@ -1105,6 +1182,7 @@ async function refresh() {
     document.getElementById('panel').style.display = 'none';
     document.getElementById('logout').style.display = 'none';
     document.getElementById('status').textContent = 'not authenticated';
+    await loadTargets();
   }
 }
 document.addEventListener('click', async function (e) {

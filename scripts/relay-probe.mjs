@@ -29,6 +29,7 @@ const instanceToken = arg('instance-token', 'DSH_RELAY_PROBE_TOKEN');
 const clientToken = arg('client-token', 'DSH_RELAY_PROBE_CLIENT_TOKEN');
 const id = arg('id', 'DSH_RELAY_PROBE_ID') ?? 'probe-' + Date.now();
 const name = arg('name', 'DSH_RELAY_PROBE_NAME') ?? 'probe';
+const holdSec = Number(arg('hold', 'DSH_RELAY_PROBE_HOLD') ?? 0);
 
 if (!relayUrl || !instanceToken) {
   console.error('usage: node scripts/relay-probe.mjs --relay <url> --instance-token <token> [--client-token <token>]');
@@ -119,6 +120,11 @@ try {
   console.log(`probe: unknown-instance status=${missing.status} (expect 404)`);
 
   console.log('PROBE_OK');
+  if (Number.isFinite(holdSec) && holdSec > 0) {
+    console.log(`holding the tunnel open for ${holdSec}s (external checks: wildcard host or /relay/instance/${id}/...)`);
+    await new Promise((resolve) => setTimeout(resolve, holdSec * 1000));
+    console.log('PROBE_DONE');
+  }
 } catch (error) {
   console.error(`PROBE_FAILED: ${error.message}`);
   process.exitCode = 1;

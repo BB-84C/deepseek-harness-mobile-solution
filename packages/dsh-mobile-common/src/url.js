@@ -2,7 +2,9 @@
 // module exposes URLs only.
 //
 // tailscale mode → http://<magicdns-hostname | tailnet-ip>:<gatewayPort>/
-// relay mode     → https://<relayUrl>/instance/<instanceId>/
+// relay mode     → https://<relayHost>/instance/<instanceId>/   (the relay
+//                  sets a routing cookie there; the official frontend's
+//                  absolute /api paths then ride that cookie)
 // pairing        → <accessUrl>mobile/pair?code=<code>
 //
 
@@ -26,8 +28,12 @@ export function buildAccessUrl({ config, tailscaleIp, tailscaleHostname } = {}) 
   if (!config) return '';
   if (config.mode === 'relay') {
     const host = relayBaseUrl(config.relay && config.relay.url);
-    const instanceId = config.relay && config.relay.instanceId ? config.relay.instanceId : '';
-    return `https://${host}/instance/${encodeURIComponent(instanceId)}/`;
+    const instanceId = (config.relay && config.relay.instanceId ? config.relay.instanceId : '').toLowerCase();
+    if (host && instanceId) {
+      return `https://${host}/instance/${encodeURIComponent(instanceId)}/`;
+    }
+    // No instance id: point at the relay's instance picker instead.
+    return `https://${host}/relay/`;
   }
   // tailscale: prefer MagicDNS hostname, else tailnet IP
   const host = tailscaleHostname || tailscaleIp || '';
