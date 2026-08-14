@@ -237,7 +237,6 @@ export class WSSocket extends EventEmitter {
   }
 
   _onTransportClose() {
-    if (this._closed) this._closed = true
     this._emitClose(1006, '')
   }
 

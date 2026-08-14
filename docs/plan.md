@@ -192,16 +192,20 @@ update                        升级两个插件（转发 dsh plugin update）�
 | # | 里程碑 | 内容 | 状态 |
 | --- | --- | --- | --- |
 | M0 | 基础 context + 规划 | 调研 dsh 源码与 opencode-mobile；git 仓库脚手架；本 plan | ✅ 进行中（本 commit 收尾） |
-| M1 | dsh-mobile-cli 插件 | `dsh --profile mobile` 命令族骨架 + service 管理 + config/status/url/doctor | ⬜ |
-| M2 | dsh-mobile-server 插件 | gateway 反代 + 设备认证 + tailscale 绑定 + 常驻服务联调 | ⬜ |
+| M1 | dsh-mobile-cli 插件 | `dsh --profile mobile` 命令族 + service 管理 + config/status/url/doctor | ✅ 本机实测通过 |
+| M2 | dsh-mobile-server 插件 | gateway 反代 + 设备认证 + tailscale 绑定 + 常驻服务联调 | 🔄 gateway 实现中（subagent） |
 | M3 | relay + 隧道 | dsh-relay 服务 + 实例隧道客户端 + 目录/多路复用 | ⬜ |
 | M4 | 设备配对与安全加固 | 配对码兑换、哈希存储、撤销踢会话、限速、文档化威胁模型 | ⬜ |
 | M5 | 部署与文档 | tailscale/VPS relay 部署脚本与教程、插件安装说明、三平台自启模板 | ⬜ |
 | M6 | 移动 UI/UX specs | mobile-web / mobile-app（Android+iOS）specs（交其他 agent） | ⬜ |
 | M7 | 端到端验收 | 本机 tailscale P2P 实测 + relay 模拟实测；README 完善；发布前检查 | ⬜ |
 
-当前进度：M0 收尾（本机 git 仓库已 init、安全目录例外已配、README/LICENSE/AGENTS/plan 就绪，
-待与用户确认 §6 决策后进入 M1）。
+当前进度：M1 完成（本机 E2E：`dsh --profile mobile doctor/status/tailscale status/config set/service start`
+全部实测通过；`service stop` 在无侧车文件时按设计拒绝杀进程，防误杀红线验证 ✅）。
+M2 进行中：gateway（认证+反代）由 subagent 实现；M3 relay 原型在修 bug（targets online 标志、
+POST body 路径 socket 中断）。关键集成发现：pnpm 对 Windows 绝对路径 link:/file: 解析有 bug，
+installer 采用 profile 内 vendor-packages junction + 相对 spec + 自建 node_modules 链接（见 §2-7、
+scripts/install-mobile.mjs）。
 
 ## 5. 仓库布局
 

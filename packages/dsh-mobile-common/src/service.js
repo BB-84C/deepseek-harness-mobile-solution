@@ -262,20 +262,18 @@ export function createService(deps = {}) {
     if (!fs.existsSync(bin)) return { ok: false, error: `dsh binary not found at ${bin}` };
 
     const token = randomToken();
-    // npm's Windows shim (dsh.cmd) cannot be spawned detached without a shell.
-    // When we run inside dsh ourselves, process.argv[1] is the real JS entry —
-    // spawn it with the current node executable instead.
+    // npm's Windows shims (dsh.cmd / dsh.ps1 / the extensionless `dsh`) cannot
+    // be spawned detached without a shell. When we run inside dsh ourselves,
+    // process.argv[1] is the real JS entry — spawn it with the current node
+    // executable instead. An explicit DSH_BIN is trusted as-is.
     let launchBin = bin;
     const args = [];
-    if (platform === 'win32' && /\.cmd$/i.test(launchBin)) {
-      if (process.argv[1]) {
-        args.push(process.argv[1]);
-        launchBin = process.execPath;
-      } else {
-        return { ok: false, error: `cannot launch dsh on Windows: ${bin} is a .cmd shim and no node entry is available; set DSH_BIN to a directly executable target` };
-      }
+    if (platform === 'win32' && !env?.DSH_BIN && process.argv[1]) {
+      args.push(process.argv[1]);
+      launchBin = process.execPath;
     }
     args.push('--profile', 'web');
+    if (config.webPort) args.push('--port', String(config.webPort));
     for (const authority of authorities || []) {
       args.push('--trusted-host', authority);
     }

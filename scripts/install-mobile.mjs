@@ -81,6 +81,11 @@ function removeLink(path) {
 function ensureVendorLink(profileDir) {
   const linkPath = join(profileDir, "vendor-packages");
   const target = join(REPO_ROOT, "packages");
+  ensureDirLink(linkPath, target, "vendor-packages");
+}
+
+/** Create (or keep) a junction/symlink at linkPath pointing at target. */
+function ensureDirLink(linkPath, target, label) {
   try {
     const stat = lstatSync(linkPath);
     if (!stat.isSymbolicLink()) {
@@ -91,6 +96,7 @@ function ensureVendorLink(profileDir) {
   } catch {
     /* absent — create */
   }
+  mkdirSync(dirname(linkPath), { recursive: true });
   symlinkSync(target, linkPath, process.platform === "win32" ? "junction" : "dir");
 }
 
@@ -113,6 +119,13 @@ function installProfile(name) {
     }
     dependencies[pkgName] = `link:./vendor-packages/${pkgDir}`;
     if (!bundles.includes(pkgName)) bundles.push(pkgName);
+    // dsh resolves bundles through node_modules (not vendor-packages), so
+    // materialize the same link pnpm would create for the manifest spec.
+    ensureDirLink(
+      join(dir, "node_modules", ...pkgName.split("/")),
+      join(REPO_ROOT, "packages", pkgDir),
+      pkgName,
+    );
   }
   manifest.dependencies = dependencies;
   manifest.dsh = { ...(manifest.dsh ?? {}), profile: { ...(manifest.dsh?.profile ?? {}), bundles } };

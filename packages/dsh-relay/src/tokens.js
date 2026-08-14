@@ -112,7 +112,8 @@ export class TokenStore {
   }
 
   // Revoke by unique hash prefix; returns the live entry or null.
-  revoke(hashPrefix) {
+  // Awaits persistence so revocation is durable before the caller proceeds.
+  async revoke(hashPrefix) {
     if (typeof hashPrefix !== 'string' || hashPrefix.length === 0) return null
     const prefix = hashPrefix.toLowerCase()
     const entry = this.entries.find(
@@ -120,7 +121,7 @@ export class TokenStore {
     )
     if (!entry) return null
     entry.revoked = true
-    this._save()
+    await this._save()
     return entry
   }
 
