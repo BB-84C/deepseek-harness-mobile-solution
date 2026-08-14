@@ -523,13 +523,11 @@ describe('relay integration', () => {
     }
   })
 
-  test('passkey stub returns 501', async () => {
-    const res = await request(base, '/relay/api/passkey/register', {
+  test('passkey register-options requires owner session', async () => {
+    const res = await request(base, '/relay/api/passkey/register-options', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({}),
     })
-    assert.strictEqual(res.status, 501)
+    assert.strictEqual(res.status, 401)
   })
 
   test('rate limit returns 429', async () => {

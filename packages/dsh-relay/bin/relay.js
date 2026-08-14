@@ -36,6 +36,9 @@ async function main() {
   const host = args['--host'] ?? process.env.DSH_RELAY_HOST ?? '127.0.0.1'
   const port = Number(args['--port'] ?? process.env.DSH_RELAY_PORT ?? 4097)
   const dataDir = path.resolve(args['--data-dir'] ?? process.env.DSH_RELAY_DATA_DIR ?? './data')
+  const rpName = args['--rp-name'] ?? process.env.DSH_RELAY_RP_NAME ?? 'dsh-relay'
+  const rpId = args['--rp-id'] ?? process.env.DSH_RELAY_RP_ID ?? null
+  const origin = args['--origin'] ?? process.env.DSH_RELAY_ORIGIN ?? null
 
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     console.error('--port must be an integer between 0 and 65535')
@@ -56,7 +59,7 @@ async function main() {
   const tokenStore = new TokenStore(path.join(dataDir, 'tokens.json'))
   await tokenStore.load()
 
-  const relay = createRelayServer({ host, port, dataDir })
+  const relay = createRelayServer({ host, port, dataDir, rpName, rpId, origin })
   const issued = await relay.ensureBootstrap(bootstrapRaw)
 
   await relay.start()

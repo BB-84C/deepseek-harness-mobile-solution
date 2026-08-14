@@ -47,7 +47,10 @@
 | `/relay/api/tokens` | GET/POST | owner cookie | 列出 / 创建凭据 |
 | `/relay/api/tokens/<hashPrefix>` | DELETE | owner cookie | 撤销凭据并踢活连接 |
 | `/relay/api/logout` | POST | 无 | 清除 owner 会话 cookie |
-| `/relay/api/passkey/*` | POST | 无 | `501` 占位（WebAuthn 为 M4） |
+| `/relay/api/passkey/register-options` | POST | owner cookie | 发起 passkey 注册，返回 `{challenge, rp, user}` |
+| `/relay/api/passkey/register-verify` | POST | owner cookie | 校验并存储凭据公钥 → `{ok:true}` |
+| `/relay/api/passkey/login-options` | POST | 无 | 返回登录 `{challenge}` |
+| `/relay/api/passkey/login-verify` | POST | 无 | 校验断言，建立 owner 会话 → `{ok:true}` |
 
 ## 3. 认证
 
@@ -203,8 +206,12 @@ Upgrade: websocket
 4. **比较**：校验使用 `crypto.timingSafeEqual` 的常量时间哈希比对（`tokens.js` 的
    `verify` 先哈希呈现的 token，再与全部存储哈希逐一 timing-safe 比较，不短路）。
 5. **bootstrap 一次性**：owner 引导密钥只生效一次；泄漏后需重启生成新密钥。
-6. **passkey（M4）**：WebAuthn owner 登录为后续里程碑，当前 `/relay/api/passkey/*`
-   返回 501。
+6. **passkey（owner 登录）**：WebAuthn 无口令登录已实现（`src/webauthn.js` 手写
+   CBOR/authData/COSE 解析，零依赖）。凭据**只存公钥**（`passkeys.json`，原子写）；
+   challenge 为 32 字节随机数 base64url，单次使用、5 分钟过期；注册/登录的
+   clientDataJSON 校验 `type`/`origin`/`challenge`，断言签名用 ES256（DER）或
+   RS256（RSA-PSS, saltLen=32）验证；登录时比对签名计数器（signCount）防克隆。
+   失败一律 `401 {"error":"passkey-invalid"}`，不泄露堆栈。
 7. **审计**：授权头、cookie 不落日志；错误响应不含内部堆栈。
 
 ## 11. 测试用假实例

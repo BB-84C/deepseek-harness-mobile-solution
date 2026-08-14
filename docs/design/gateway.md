@@ -63,7 +63,8 @@ mobile gateway (node:http, 本插件)
 | GET `/mobile/health` | 无 | `{ok:true, version, mode, instanceId, uptimeSec}` |
 | GET `/mobile/auth` | 无 | 极简暗色登录页（配对码/设备 token 两种输入；风格中性，后续对齐 dsh 观感） |
 | POST `/mobile/auth` | 无 | `{code}` 或 `{token}` → 校验 → `Set-Cookie: dsh_mobile_sid`（HttpOnly, SameSite=Lax, secure 当 https, TTL=sessionTtlDays）；`{redirect}` 可带 |
-| GET `/mobile/pair?code=<6位>` | 无 | 配对码一次性兑换：消耗配对记录→签发设备（存哈希）→ 建立会话并 302 到 `/` |
+| GET `/mobile/pair?code=<6位>` | 无 | 配对码一次性兑换（浏览器）：签发设备（存哈希）→ 会话 cookie → 302 `/` |
+| POST `/mobile/pair` | 无 | 配对码一次性兑换（app，JSON）：`{code}` → 200 `{ok, deviceId, token, expiresAt:null}`（token 只此一次；设备 token 长期有效、以撤销管理） |
 | POST `/mobile/logout` | 会话 | 清会话 cookie（浏览器） |
 | GET `/mobile/api/devices` | 会话且设备为 owner | 设备列表 |
 | DELETE `/mobile/api/devices/<id>` | 会话且设备为 owner | 撤销：置 revoked、踢掉该设备全部活跃会话与流 |

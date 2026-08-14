@@ -59,7 +59,7 @@ app 是**已存在 dsh 会话的监督与控制面板**：列会话、打开会�
 | `POST /mobile/api/token` | Bearer + owner | 给已配对设备重签长期 token（丢失恢复） | 一期 app **不暴露**（见 §9） |
 | `GET /mobile/auth`、`POST /mobile/auth`、`GET /mobile/pair?code=`、`POST /mobile/logout` | 见 gateway.md | 浏览器 cookie 面 | **app 不使用**（app 走 Bearer，无 cookie） |
 
-> 说明：`POST /mobile/pair {code} → {deviceId, token, expiresAt}` 是 app 的 mint-at-redemption 契约（与浏览器 `GET /mobile/pair?code= → 302` 并列）。此端点在 `gateway.md` §4.1 表中以浏览器会话视角列出，app 侧契约以本表为准；实现 gateway（M2）须同时提供 JSON 形态。**待办对齐**：M2 落地时确认 `POST /mobile/pair` 的入参字段（是否带 `deviceName`）与 `expiresAt` 语义（是否长期、TTL 取值），并与本 spec 的 §4.1 一致。
+> 说明：`POST /mobile/pair {code} → {deviceId, token, expiresAt}` 是 app 的 mint-at-redemption 契约（与浏览器 `GET /mobile/pair?code= → 302` 并列）。**已与 M2 gateway 实现对齐**：请求 `{code}`（无需 deviceName），响应 `{ok:true, deviceId, token, expiresAt:null}`——设备 token 长期有效、以撤销管理，故 `expiresAt` 恒为 `null`；token 原文只在本次响应中出现一次。
 
 ### 3.2 代理路径（app 消费官方 dsh Web 的 `/api` 面）
 
@@ -87,7 +87,7 @@ app 是**已存在 dsh 会话的监督与控制面板**：列会话、打开会�
 
 ### 3.4 `/mobile/api/status` 响应形状（app 用）
 
-> 该形状在 `gateway.md` 中未逐字段固化；本 spec 定义 app 必须消费的最小契约，M2 gateway 实现须对齐。
+> 该形状已与 M2 gateway 实现对齐（`/mobile/api/status`，任意已认证设备 Bearer 或 loopback 可读）。
 
 ```json
 {

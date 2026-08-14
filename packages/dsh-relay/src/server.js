@@ -4,11 +4,22 @@
 
 import http from 'node:http'
 import path from 'node:path'
-import { randomBytes } from 'node:crypto'
+import { promises as fs } from 'node:fs'
+import { randomBytes, createHash } from 'node:crypto'
 import { TokenStore } from './tokens.js'
 import { Registry } from './registry.js'
 import { WSSocket, acceptKey } from './ws.js'
 import { connect } from './ws-client.js'
+import {
+  b64urlEncode,
+  b64urlDecode,
+  parseAttestationObject,
+  parseAuthData,
+  cosePublicKeyToJwk,
+  jwkToPublicKeyPem,
+  decodeClientDataJSON,
+  verifyAssertionSignature,
+} from './webauthn.js'
 
 // --- Limits / defaults -------------------------------------------------------
 
@@ -18,6 +29,9 @@ const MAX_JSON_BODY = 64 * 1024 // cap API JSON bodies (setup / create token)
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000 // owner session expiry
 const TUNNEL_REGISTER_TIMEOUT_MS = 10_000 // tunnel registration handshake bound
 const OWNER_COOKIE = 'dsh_relay_owner'
+const CHALLENGE_TTL_MS = 5 * 60 * 1000 // WebAuthn challenge lifetime
+const MAX_PASSKEY_BODY = 16 * 1024 // cap register/login-verify JSON bodies
+const OWNER_USER_ID = b64urlEncode(Buffer.from('dsh-relay-owner', 'utf8'))
 
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
@@ -61,6 +75,53 @@ class RateLimiter {
       return true
     }
     return false
+  }
+}
+
+// Persists WebAuthn credentials (public keys only) to <data-dir>/passkeys.json.
+class PasskeyStore {
+  constructor(filePath) {
+    this.filePath = filePath
+    this.credentials = []
+    this._loaded = false
+  }
+
+  async load() {
+    if (this._loaded) return
+    this._loaded = true
+    try {
+      const text = await fs.readFile(this.filePath, 'utf8')
+      const parsed = JSON.parse(text)
+      if (Array.isArray(parsed)) this.credentials = parsed
+      else if (parsed && Array.isArray(parsed.credentials)) this.credentials = parsed.credentials
+      else this.credentials = []
+    } catch (err) {
+      if (err.code !== 'ENOENT' && !(err instanceof SyntaxError)) throw err
+      this.credentials = []
+    }
+  }
+
+  async _persist() {
+    await fs.mkdir(path.dirname(this.filePath), { recursive: true })
+    const tmp = this.filePath + '.' + process.pid + '.tmp'
+    await fs.writeFile(tmp, JSON.stringify({ version: 1, credentials: this.credentials }, null, 2), 'utf8')
+    await fs.rename(tmp, this.filePath)
+  }
+
+  async save(credential) {
+    this.credentials.push(credential)
+    await this._persist()
+  }
+
+  findByCredentialId(credentialId) {
+    return this.credentials.find((c) => c.credentialId === credentialId) || null
+  }
+
+  async updateCounter(credential, counter) {
+    if (counter > credential.counter) {
+      credential.counter = counter
+      await this._persist()
+    }
   }
 }
 
@@ -140,6 +201,7 @@ function sanitizeHeaders(headers) {
   for (const [k, v] of Object.entries(headers)) {
     const lk = k.toLowerCase()
     if (HOP_BY_HOP.has(lk)) continue
+    if (lk.startsWith('x-relay-')) continue // prevent spoofing relay response headers
     if (Array.isArray(v)) out[k] = v.join(', ')
     else if (v != null) out[k] = String(v)
   }
@@ -159,11 +221,16 @@ export function createRelayServer(options = {}) {
     port: options.port ?? 4097,
     dataDir: options.dataDir ?? './data',
     rateLimitPerMin: options.rateLimitPerMin ?? 120,
+    rpName: options.rpName ?? 'dsh-relay',
+    rpId: options.rpId ?? null, // null -> derive from request host
+    origin: options.origin ?? null, // null -> derive from request headers
   }
 
   const tokenStore = new TokenStore(path.join(opts.dataDir, 'tokens.json'))
+  const passkeyStore = new PasskeyStore(path.join(opts.dataDir, 'passkeys.json'))
   const registry = new Registry()
   const sessions = new Map() // sessionId -> expiry epoch ms
+  const challenges = new Map() // WebAuthn challenge (b64url) -> expiry epoch ms
   const pendingMap = new Map() // streamId -> pending request record
   const clientRequests = new Map() // token hash -> Set<streamId>
   const rateLimiter = new RateLimiter(opts.rateLimitPerMin)
@@ -208,6 +275,130 @@ export function createRelayServer(options = {}) {
     const entry = tokenStore.verify(raw)
     if (!entry || entry.kind !== 'client') return null
     return { type: 'client', entry }
+  }
+
+  // --- WebAuthn (owner passkey) ---------------------------------------------
+
+  function expectedOrigin(req) {
+    if (opts.origin) return opts.origin
+    const proto = (req.headers['x-forwarded-proto'] || 'http').toString()
+    const host = (req.headers['x-forwarded-host'] || req.headers.host || 'localhost').toString()
+    return `${proto}://${host}`
+  }
+
+  function expectedRpId(req) {
+    if (opts.rpId) return opts.rpId
+    const host = (req.headers['x-forwarded-host'] || req.headers.host || 'localhost').toString()
+    return host.split(':')[0]
+  }
+
+  function createChallenge() {
+    if (challenges.size >= 100) {
+      const now = Date.now()
+      for (const [c, exp] of challenges) {
+        if (now > exp) challenges.delete(c)
+      }
+    }
+    const c = randomBytes(32).toString('base64url')
+    challenges.set(c, Date.now() + CHALLENGE_TTL_MS)
+    return c
+  }
+
+  function consumeChallenge(c) {
+    const exp = challenges.get(c)
+    if (exp === undefined) return false
+    challenges.delete(c)
+    if (Date.now() > exp) return false
+    return true
+  }
+
+  function handlePasskeyRegisterOptions(req, res) {
+    if (!isOwner(req)) return sendJson(res, 401, { error: 'unauthorized' })
+    return sendJson(res, 200, {
+      challenge: createChallenge(),
+      rp: { name: opts.rpName, id: expectedRpId(req) },
+      user: { id: OWNER_USER_ID, name: 'owner', displayName: 'Owner' },
+    })
+  }
+
+  async function handlePasskeyRegisterVerify(req, res) {
+    if (!isOwner(req)) return sendJson(res, 401, { error: 'unauthorized' })
+    let body
+    try {
+      body = await readJson(req, MAX_PASSKEY_BODY)
+    } catch {
+      return sendJson(res, 400, { error: 'invalid-json' })
+    }
+    try {
+      if (!body || !body.id || !body.response) throw new Error('bad request')
+      const clientData = decodeClientDataJSON(b64urlDecode(body.response.clientDataJSON))
+      if (clientData.type !== 'webauthn.create') throw new Error('bad type')
+      if (clientData.origin !== expectedOrigin(req)) throw new Error('bad origin')
+      if (!consumeChallenge(clientData.challenge)) throw new Error('bad challenge')
+      const attObj = parseAttestationObject(b64urlDecode(body.response.attestationObject))
+      const authData = parseAuthData(attObj.authData)
+      if (!authData.credentialId || !authData.cosePublicKey) throw new Error('no attested credential')
+      const expectedHash = createHash('sha256').update(expectedRpId(req)).digest()
+      if (!authData.rpIdHash.equals(expectedHash)) throw new Error('bad rpIdHash')
+      if (!b64urlDecode(body.id).equals(authData.credentialId)) throw new Error('credential id mismatch')
+      const { alg, jwk } = cosePublicKeyToJwk(authData.cosePublicKey)
+      const publicKeyPem = jwkToPublicKeyPem(jwk)
+      await passkeyStore.save({
+        credentialId: String(body.id),
+        publicKeyPem,
+        alg,
+        counter: authData.counter,
+        createdAt: Date.now(),
+      })
+      return sendJson(res, 200, { ok: true })
+    } catch {
+      return sendJson(res, 401, { error: 'passkey-invalid' })
+    }
+  }
+
+  function handlePasskeyLoginOptions(req, res) {
+    return sendJson(res, 200, { challenge: createChallenge() })
+  }
+
+  async function handlePasskeyLoginVerify(req, res) {
+    let body
+    try {
+      body = await readJson(req, MAX_PASSKEY_BODY)
+    } catch {
+      return sendJson(res, 400, { error: 'invalid-json' })
+    }
+    try {
+      if (!body || !body.id || !body.response) throw new Error('bad request')
+      const clientDataJSON = b64urlDecode(body.response.clientDataJSON)
+      const clientData = decodeClientDataJSON(clientDataJSON)
+      if (clientData.type !== 'webauthn.get') throw new Error('bad type')
+      if (clientData.origin !== expectedOrigin(req)) throw new Error('bad origin')
+      if (!consumeChallenge(clientData.challenge)) throw new Error('bad challenge')
+      const credentialId = String(body.id)
+      const cred = passkeyStore.findByCredentialId(credentialId)
+      if (!cred) throw new Error('unknown credential')
+      const authenticatorData = b64urlDecode(body.response.authenticatorData)
+      const authData = parseAuthData(authenticatorData)
+      const signature = b64urlDecode(body.response.signature)
+      if (!verifyAssertionSignature({
+        publicKeyPem: cred.publicKeyPem,
+        alg: cred.alg,
+        authenticatorData,
+        clientDataJSON,
+        signature,
+      })) {
+        throw new Error('bad signature')
+      }
+      if (authData.counter > 0 && cred.counter > 0 && authData.counter <= cred.counter) {
+        throw new Error('counter regression')
+      }
+      await passkeyStore.updateCounter(cred, authData.counter)
+      const sid = createOwnerSession()
+      setOwnerCookie(res, sid, req)
+      return sendJson(res, 200, { ok: true })
+    } catch {
+      return sendJson(res, 401, { error: 'passkey-invalid' })
+    }
   }
 
   // --- response helpers -----------------------------------------------------
@@ -509,12 +700,17 @@ export function createRelayServer(options = {}) {
       return handleSetup(req, res)
     }
 
-    if (method === 'POST' && pathname.startsWith('/relay/api/passkey/')) {
-      // WebAuthn passkey owner login is a later milestone (M4).
-      return sendJson(res, 501, {
-        error: 'not-implemented',
-        message: 'WebAuthn passkey owner login is a later milestone (M4).',
-      })
+    if (method === 'POST' && pathname === '/relay/api/passkey/register-options') {
+      return handlePasskeyRegisterOptions(req, res)
+    }
+    if (method === 'POST' && pathname === '/relay/api/passkey/register-verify') {
+      return handlePasskeyRegisterVerify(req, res)
+    }
+    if (method === 'POST' && pathname === '/relay/api/passkey/login-options') {
+      return handlePasskeyLoginOptions(req, res)
+    }
+    if (method === 'POST' && pathname === '/relay/api/passkey/login-verify') {
+      return handlePasskeyLoginVerify(req, res)
     }
 
     if (method === 'POST' && pathname === '/relay/api/logout') {
@@ -647,12 +843,14 @@ export function createRelayServer(options = {}) {
   const relay = {
     httpServer,
     tokenStore,
+    passkeyStore,
     registry,
     options: opts,
     port: null,
 
     async start() {
       await tokenStore.load()
+      await passkeyStore.load()
       startedAt = Date.now()
       await new Promise((resolve, reject) => {
         const onError = (err) => reject(err)
@@ -809,6 +1007,7 @@ form { display: flex; gap: 8px; align-items: center; margin: 12px 0; flex-wrap: 
     <button type="submit">Set up owner session</button>
   </form>
   <p id="setupMsg"></p>
+  <p><button id="loginPasskey">Sign in with passkey</button></p>
 </section>
 
 <section id="panel" style="display:none">
@@ -832,6 +1031,9 @@ form { display: flex; gap: 8px; align-items: center; margin: 12px 0; flex-wrap: 
     <thead><tr><th>Hash</th><th>Label</th><th>Kind</th><th>Created</th><th>Last used</th><th>State</th></tr></thead>
     <tbody></tbody>
   </table>
+
+  <h2>Security</h2>
+  <p><button id="registerPasskey">Register passkey</button> <span id="passkeyMsg"></span></p>
 </section>
 
 <script>
@@ -932,6 +1134,93 @@ document.getElementById('createToken').addEventListener('submit', async function
   }
   await loadTokens();
 });
+function bufToB64url(buf) {
+  const bytes = new Uint8Array(buf);
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64urlToBuf(s) {
+  let t = String(s).replace(/-/g, '+').replace(/_/g, '/');
+  while (t.length % 4) t += '=';
+  const bin = atob(t);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+async function registerPasskey() {
+  const el = document.getElementById('passkeyMsg');
+  el.textContent = '';
+  const opts = await api('/relay/api/passkey/register-options', { method: 'POST' });
+  if (opts.status !== 200) { el.textContent = 'Could not start registration.'; return; }
+  const o = opts.body;
+  let credential;
+  try {
+    credential = await navigator.credentials.create({
+      publicKey: {
+        challenge: b64urlToBuf(o.challenge),
+        rp: o.rp,
+        user: { id: b64urlToBuf(o.user.id), name: o.user.name, displayName: o.user.displayName },
+        pubKeyCredParams: [
+          { type: 'public-key', alg: -7 },
+          { type: 'public-key', alg: -257 }
+        ],
+        timeout: 60000,
+        attestation: 'none'
+      }
+    });
+  } catch (err) {
+    el.textContent = 'Registration cancelled or failed.';
+    return;
+  }
+  const res = await api('/relay/api/passkey/register-verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id: credential.id,
+      rawId: bufToB64url(credential.rawId),
+      response: {
+        clientDataJSON: bufToB64url(credential.response.clientDataJSON),
+        attestationObject: bufToB64url(credential.response.attestationObject)
+      }
+    })
+  });
+  el.textContent = res.status === 200 ? 'Passkey registered.' : 'Registration failed.';
+}
+async function loginPasskey() {
+  const opts = await api('/relay/api/passkey/login-options', { method: 'POST' });
+  if (opts.status !== 200) { document.getElementById('setupMsg').textContent = 'Could not start sign-in.'; return; }
+  let assertion;
+  try {
+    assertion = await navigator.credentials.get({
+      publicKey: { challenge: b64urlToBuf(opts.body.challenge), timeout: 60000 }
+    });
+  } catch (err) {
+    document.getElementById('setupMsg').textContent = 'Sign-in cancelled or failed.';
+    return;
+  }
+  const res = await api('/relay/api/passkey/login-verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id: assertion.id,
+      rawId: bufToB64url(assertion.rawId),
+      response: {
+        clientDataJSON: bufToB64url(assertion.response.clientDataJSON),
+        authenticatorData: bufToB64url(assertion.response.authenticatorData),
+        signature: bufToB64url(assertion.response.signature),
+        userHandle: assertion.response.userHandle ? bufToB64url(assertion.response.userHandle) : null
+      }
+    })
+  });
+  if (res.status === 200) {
+    location.reload();
+  } else {
+    document.getElementById('setupMsg').textContent = 'Passkey sign-in failed.';
+  }
+}
+document.getElementById('loginPasskey').addEventListener('click', loginPasskey);
+document.getElementById('registerPasskey').addEventListener('click', registerPasskey);
 refresh();
 setInterval(loadTargets, 5000);
 </script>
