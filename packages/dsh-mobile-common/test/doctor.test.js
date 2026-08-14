@@ -106,7 +106,7 @@ test('doctor errors when the mobile home is not writable', async () => {
 
 test('checkLlmCredentials finds env, settings, credentials and .env sources', async () => {
   const { checkLlmCredentials } = await import('../src/doctor.js');
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-llm-'));
+  const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'dsh-llm-'));
 
   // 1. env key
   const viaEnv = checkLlmCredentials({ env: { DEEPSEEK_API_KEY: 'x' }, home: path.join(tmp, 'mobile'), cwd: tmp, homedir: tmp });
@@ -137,5 +137,5 @@ test('checkLlmCredentials finds env, settings, credentials and .env sources', as
   // 5. nothing configured
   const none = checkLlmCredentials({ env: {}, home: path.join(dshHome, 'mobile'), cwd: tmp, homedir: tmp });
   assert.equal(none.level, 'error');
-  await fs.rm(tmp, { recursive: true, force: true });
+  await fs.promises.rm(tmp, { recursive: true, force: true });
 });
