@@ -75,13 +75,13 @@ export function run(args, opts = {}) {
 
 /**
  * `tailscale status --json` parsed.
- * @returns {{ ok: boolean, data?: object, raw?: string, error?: string|null }}
+ * @returns {{ ok: boolean, json?: object, raw?: string, error?: string|null }}
  */
 export function tailscaleStatus(opts = {}) {
   const r = run(['status', '--json'], opts);
   if (!r.ok) return { ok: false, raw: r.stdout, error: r.error };
   try {
-    return { ok: true, data: JSON.parse(r.stdout) };
+    return { ok: true, json: JSON.parse(r.stdout) };
   } catch {
     return { ok: false, raw: r.stdout, error: 'tailscale status returned invalid JSON' };
   }
@@ -105,8 +105,8 @@ export function tailscaleIp4(opts = {}) {
  */
 export function tailscaleHostname(opts = {}) {
   const s = tailscaleStatus(opts);
-  if (!s.ok || !s.data) return null;
-  const dns = s.data.Self && s.data.Self.DNSName;
+  if (!s.ok || !s.json) return null;
+  const dns = s.json.Self && s.json.Self.DNSName;
   if (typeof dns !== 'string' || !dns) return null;
   return dns.replace(/\.$/, '');
 }
@@ -131,13 +131,13 @@ export function tailscaleUp(opts = {}) {
 /**
  * `tailscale serve status --json` parsed. May fail on old versions — degrades
  * gracefully to `{ ok: false }` instead of throwing.
- * @returns {{ ok: boolean, data?: object, raw?: string, error?: string|null }}
+ * @returns {{ ok: boolean, json?: object, raw?: string, error?: string|null }}
  */
 export function tailscaleServeStatus(opts = {}) {
   const r = run(['serve', 'status', '--json'], opts);
   if (!r.ok) return { ok: false, raw: r.stdout, error: r.error };
   try {
-    return { ok: true, data: JSON.parse(r.stdout) };
+    return { ok: true, json: JSON.parse(r.stdout) };
   } catch {
     return { ok: false, raw: r.stdout, error: 'tailscale serve status returned invalid JSON' };
   }

@@ -4,14 +4,31 @@
   "private": true,
   "type": "module",
   "license": "MIT",
-  "description": "Mobile remote-access control plane for DeepSeek Harness (dsh). CLI business modules only; the dsh plugin entry (bundle patch + cmdline parsing) is wired separately.",
+  "description": "Mobile remote-access control plane for DeepSeek Harness (dsh) — the `dsh --profile mobile` command family (service / tailscale / relay / device / config / doctor).",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test ../dsh-mobile-common/test/"
   },
+  "exports": {
+    "./startup": "./src/startup.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src/startup.js",
+    "src/commands.js",
+    "cordis.patch.yml"
+  ],
   "dependencies": {
-    "commander": "^15"
+    "commander": "^15",
+    "@deepseek-ai/dsh-cmdline": "^0.1.0-rc.6",
+    "@bb-84c/dsh-mobile-common": "workspace:*"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
   }
 }

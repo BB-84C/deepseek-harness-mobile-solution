@@ -1,0 +1,52 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: false
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .: {}
+
+  packages/dev/hello-bundle: {}
+
+  packages/dsh-mobile-cli:
+    dependencies:
+      '@bb-84c/dsh-mobile-common':
+        specifier: workspace:*
+        version: link:../dsh-mobile-common
+      '@deepseek-ai/dsh-cmdline':
+        specifier: ^0.1.0-rc.6
+        version: 0.1.0-rc.6
+      commander:
+        specifier: ^15
+        version: 15.0.0
+
+  packages/dsh-mobile-common: {}
+
+  packages/dsh-mobile-server:
+    dependencies:
+      '@bb-84c/dsh-mobile-common':
+        specifier: workspace:*
+        version: link:../dsh-mobile-common
+
+  packages/dsh-relay: {}
+
+packages:
+
+  '@deepseek-ai/dsh-cmdline@0.1.0-rc.6':
+    resolution: {integrity: sha512-dqRHF+kIlTBwt+fio/34ttp6B7Lrpm31A+EOoEwBuwaziiHTEAWVl50hS53dPFmPyVBRINavBdx7Fa7UT2/2iw==}
+    peerDependencies:
+      '@deepseek-ai/cordis': ^4.0.1
+      '@deepseek-ai/cordis-plugin-loader': ^1.0.2
+      '@deepseek-ai/dsh-invariants': ^0.1.0-rc.6
+
+  commander@15.0.0:
+    resolution: {integrity: sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg==}
+    engines: {node: '>=22.12.0'}
+
+snapshots:
+
+  '@deepseek-ai/dsh-cmdline@0.1.0-rc.6': {}
+
+  commander@15.0.0: {}

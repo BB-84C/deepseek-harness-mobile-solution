@@ -9,13 +9,14 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureMobileDirs, logsDir, resolveMobileHome } from "./home.js";
-import { loadConfig, saveConfig, setConfigValue, getConfigValue } from "./config.js";
-import * as tailscale from "./tailscale.js";
-import * as service from "./service.js";
-import * as devices from "./devices.js";
-import { buildAccessUrl, pairingUrl } from "./url.js";
-import { diagnose } from "./doctor.js";
+import { ensureMobileDirs, logsDir, resolveMobileHome } from "@bb-84c/dsh-mobile-common/home.js";
+import { loadConfig, saveConfig, setConfigValue, getConfigValue } from "@bb-84c/dsh-mobile-common/config.js";
+import * as tailscale from "@bb-84c/dsh-mobile-common/tailscale.js";
+import * as service from "@bb-84c/dsh-mobile-common/service.js";
+import * as devices from "@bb-84c/dsh-mobile-common/devices.js";
+import { buildAccessUrl, pairingUrl } from "@bb-84c/dsh-mobile-common/url.js";
+import { diagnose } from "@bb-84c/dsh-mobile-common/doctor.js";
+import { readRelayStatus } from "@bb-84c/dsh-mobile-common/relay-status.js";
 
 /** Repository root, derived from this file's real location (works through the
  * profile junction because ESM resolves the real path). */
@@ -281,8 +282,6 @@ async function relayHealth(config) {
 }
 
 async function relayTunnelState() {
-  const { readRelayStatus } = await import("./relay-status.js").catch(() => ({ readRelayStatus: null }));
-  if (typeof readRelayStatus !== "function") return null;
   return readRelayStatus();
 }
 

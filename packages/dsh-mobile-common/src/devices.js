@@ -107,7 +107,10 @@ export function createDeviceStore(deps = {}) {
     if (typeof rawToken !== 'string' || !rawToken) {
       throw new DeviceError('rawToken is required', 'INVALID_TOKEN');
     }
-    const list = pruneExpired(loadPairings(), t);
+    const rawList = loadPairings();
+    const list = pruneExpired(rawList, t);
+    // persist pruning of expired records even when the code is not found
+    if (list.length !== rawList.length) atomicWriteJson(paths().pairingsPath, list);
     const idx = list.findIndex((p) => p.code === pairingCode);
     if (idx === -1) {
       throw new DeviceError('invalid or expired pairing code', 'INVALID_CODE');
@@ -159,16 +162,16 @@ export function createDeviceStore(deps = {}) {
 
   /**
    * Revoke a device by id (sets revoked + revokedAt). Idempotent for an
-   * already-revoked device.
+   * already-revoked device. Returns null when the id is unknown.
    * @param {string} id
    * @param {{ now?: number }} [opts]
-   * @returns {object} the updated device entry
+   * @returns {object|null} the updated device entry, or null
    */
   function revokeDevice(id, opts = {}) {
     const t = opts.now ?? now();
     const devices = loadDevices();
     const device = devices.find((d) => d.id === id);
-    if (!device) throw new DeviceError(`device not found: ${id}`, 'NOT_FOUND');
+    if (!device) return null;
     device.revoked = true;
     device.revokedAt = t;
     atomicWriteJson(paths().devicesPath, devices);
