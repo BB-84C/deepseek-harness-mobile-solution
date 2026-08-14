@@ -9,11 +9,13 @@ the **host**; the phone is only a frontend.
 | --- | --- |
 | `install` | Install/repair the plugins into the `mobile` + `web` profiles (idempotent) |
 | `uninstall` | Remove the plugins from both profiles (keeps your data) |
-| `service start\|stop\|restart\|status\|logs [n]` | Manage the machine's single dsh web (detached, kill-safe, one-instance guard) |
-| `tailscale status\|ip\|connect\|ping [host]` | Tailscale transport: state, address, up, reachability |
-| `tailscale serve status\|on\|off` | HTTPS on your MagicDNS name (Let's Encrypt cert via Tailscale) |
+| `tailscale start\|stop\|restart\|logs [n]` | **Run the resident dsh web over tailscale** (one command: sets the transport, guards the single-instance port 3080, starts) |
+| `tailscale status\|ip\|connect\|ping [host]` | Tailscale state: tailnet view (+ service line), address, up, reachability |
+| `tailscale serve on\|off\|status` | HTTPS on your MagicDNS name (Let's Encrypt cert via Tailscale) |
 | `relay connect <url> --token <t> [--id] [--name]` | Register this machine with your VPS relay (fan-in) |
+| `relay start\|stop\|restart\|logs [n]` | **Run the resident dsh web through the relay** (sets the transport, guards port 3080, starts the tunnel) |
 | `relay disconnect\|status\|ping` | Leave / inspect / probe the relay connection |
+| `service start\|stop\|restart\|status\|logs [n]` | Low-level lifecycle in the currently configured transport (auto-start templates use this) |
 | `device pair --name <n>\|list\|revoke <id>` | One-time pairing codes, device directory, instant revocation |
 | `url` | Print the URL for the phone (https MagicDNS when serve is on) |
 | `config show\|get <key>\|set <key> <value>` | Read/write `$DSH_HOME/mobile/config.json` |
@@ -29,7 +31,8 @@ the **host**; the phone is only a frontend.
 | `3081` | mobile gateway (device auth + proxy) | binds the tailnet address; `tailscale serve` forwards 443 → 127.0.0.1:3081, so the phone sees only `https://<your-node>.ts.net/` |
 | `443` (tailnet) | HTTPS entry via `tailscale serve` | certificate issued and renewed by Tailscale |
 
-`config set webPort/gatewayPort` changes the first two if you ever need it.
+`config set gatewayPort` changes it if you ever need it. There is deliberately NO
+webPort knob: the resident instance always owns 3080 (one-instance principle).
 
 ## Lifecycle: after a reboot
 
@@ -38,8 +41,9 @@ the **host**; the phone is only a frontend.
   restores itself.
 - **The resident instance** starts automatically at logon if you installed an
   auto-start template once (`scripts/autostart/` — Task Scheduler / launchd /
-  systemd user unit; see `docs/deployment/service.md`). Otherwise, after boot
-  you run exactly one command: `dsh --profile mobile service start`.
+  systemd user unit; they call the low-level `service start`, which keeps the
+  configured transport). Otherwise, after boot you run exactly one command:
+  `dsh --profile mobile tailscale start` (or `relay start`).
 - **The API key** needs nothing from you: the launcher inherits your shell
   environment, and on Windows it additionally reads the machine/user registry
   scopes (`DEEPSEEK_API_KEY`), so a stale shell snapshot cannot strip it.
@@ -57,12 +61,12 @@ the same `$DSH_HOME` and resume the same sessions from both — that races the
 writer and corrupts logs (`seq gap in committed region`). There is exactly one
 command to know:
 
-- **`service start`** makes the machine's single dsh web. If the configured
-  port (default 3080) is free, the resident instance starts there — local
-  usage is unchanged (`http://127.0.0.1:3080/`) and the phone live-streams
-  every session, past and running, from that one instance.
+- **`tailscale start` / `relay start`** make the machine's single dsh web in
+  the chosen transport. If port 3080 is free, the resident instance starts
+  there — local usage is unchanged (`http://127.0.0.1:3080/`) and the phone
+  live-streams every session, past and running, from that one instance.
 - If the port is occupied by a process that is NOT the tracked resident
-  instance (your old dsh web), `service start` **refuses with exact
+  instance (your old dsh web), the start command **refuses with exact
   instructions**: stop that instance, re-run the same command. Nothing is
   touched; nothing is lost (sessions live on disk under `$DSH_HOME/sessions`).
 

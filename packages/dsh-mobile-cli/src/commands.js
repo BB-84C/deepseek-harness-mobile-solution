@@ -128,27 +128,35 @@ async function cmdStatus() {
   return 0;
 }
 
-async function cmdService(args) {
-  const [action, nRaw] = args;
-  const n = nRaw === undefined ? 50 : Number.parseInt(nRaw, 10);
-  const config = mustConfig();
-  ensureMobileDirs();
+/** Shared lifecycle core: transport-scoped start/stop/restart/status/logs.
+ * `mode` ('tailscale' | 'relay') is asserted on start; the resident instance
+ * is the SAME process regardless of transport (one instance, one registry). */
+async function serviceLifecycle(action, mode, n) {
   const logPath = join(logsDir(), "service.log");
+  ensureMobileDirs();
 
-  /** One-instance guard: refuse to start when the port is held by a process
-   * that is NOT our tracked instance (i.e. another dsh web). The resident
-   * instance always owns 3080 — there is deliberately no port knob. */
   async function startGuarded() {
+    let config = loadConfig().config;
+    if (config.mode !== mode) {
+      config = setConfigValue(config, "mode", mode);
+      saveConfig(config);
+      console.log(`transport set to ${mode}`);
+      config = loadConfig().config;
+    }
+    if (mode === "relay") {
+      if (!config.relay?.url) fail("relay.url not configured — run: dsh --profile mobile relay connect <relay-url> --token <instance-token>");
+      if (!config.relay?.instanceToken) fail("relay.instanceToken not configured — run: dsh --profile mobile relay connect <relay-url> --token <instance-token>");
+    }
     const port = 3080;
     const occupied = !(await checkPortFree(port)).free;
     if (occupied && !service.serviceStatus({ config }).running) {
       console.error(`port ${port} is occupied by another process — most likely your existing dsh web.`);
-      console.error('This machine must run ONE dsh web (session logs are single-writer).');
-      console.error('Stop that instance, then re-run:');
-      console.error('  dsh --profile mobile service start');
-      console.error('');
-      console.error('Nothing is lost: sessions live on disk under $DSH_HOME/sessions and the');
-      console.error('resident instance lists ALL of them, live-streaming included.');
+      console.error("This machine must run ONE dsh web (session logs are single-writer).");
+      console.error("Stop that instance, then re-run:");
+      console.error(`  dsh --profile mobile ${mode} start`);
+      console.error("");
+      console.error("Nothing is lost: sessions live on disk under $DSH_HOME/sessions and the");
+      console.error("resident instance lists ALL of them, live-streaming included.");
       return 1;
     }
     if (!process.env.DEEPSEEK_API_KEY) {
@@ -160,7 +168,7 @@ async function cmdService(args) {
       console.log(result.alreadyRunning ? `service already running (pid ${result.pid})` : `service failed to start: ${result.error ?? "unknown error"}`);
       return result.alreadyRunning ? 0 : 1;
     }
-    console.log(`service started (pid ${result.pid})`);
+    console.log(`service started (pid ${result.pid}, transport=${mode})`);
     console.log(`  logs : ${logPath}`);
     console.log(`  web  : ${await mobileUrl(config)}`);
     console.log("pair your phone: dsh --profile mobile device pair --name <name>");
@@ -171,6 +179,7 @@ async function cmdService(args) {
     case "start":
       return await startGuarded();
     case "stop": {
+      const config = loadConfig().config;
       const result = service.stopService({ config });
       if (result.error) {
         console.error(`refusing to stop: ${result.error}`);
@@ -180,6 +189,7 @@ async function cmdService(args) {
       return 0;
     }
     case "restart": {
+      const config = loadConfig().config;
       const stopped = service.stopService({ config });
       if (stopped.error) {
         console.error(`refusing to restart: ${stopped.error}`);
@@ -188,7 +198,7 @@ async function cmdService(args) {
       return await startGuarded();
     }
     case "status": {
-      const s = service.serviceStatus({ config });
+      const s = service.serviceStatus({ config: loadConfig().config });
       console.log(s.running ? `running (pid ${s.pid}, started ${s.startedAt ? new Date(s.startedAt).toISOString() : "?"})` : "stopped");
       if (s.running) console.log(`gateway: ${s.gatewayReachable ? "healthy" : "not responding"}`);
       return s.running ? 0 : 1;
@@ -200,6 +210,20 @@ async function cmdService(args) {
     default:
       fail(`unknown action ${JSON.stringify(action)} — use start | stop | restart | status | logs [n]`);
   }
+}
+
+/** One-line resident-service state (appended to transport status views). */
+function serviceStateLine() {
+  const s = service.serviceStatus({ config: loadConfig().config });
+  return s.running ? `service   : running (pid ${s.pid})${s.gatewayReachable ? ", gateway healthy" : ", gateway not responding"}` : "service   : stopped";
+}
+
+async function cmdService(args) {
+  const [action, nRaw] = args;
+  const n = nRaw === undefined ? 50 : Number.parseInt(nRaw, 10);
+  // Low-level lifecycle in whatever transport is currently configured
+  // (auto-start templates use this — mode-agnostic by design).
+  return await serviceLifecycle(action, loadConfig().config.mode, n);
 }
 
 async function cmdTailscale(args) {
@@ -214,8 +238,17 @@ async function cmdTailscale(args) {
       for (const peer of Object.values(status.json?.Peer ?? {})) {
         console.log(`peer   : ${peer.DNSName ?? "?"} ${(peer.TailscaleIPs ?? []).join(", ")} ${peer.Online ? "online" : "offline"}`);
       }
+      console.log(serviceStateLine());
       return 0;
     }
+    case "start":
+      return await serviceLifecycle("start", "tailscale", 50);
+    case "stop":
+      return await serviceLifecycle("stop", "tailscale", 50);
+    case "restart":
+      return await serviceLifecycle("restart", "tailscale", 50);
+    case "logs":
+      return await serviceLifecycle("logs", "tailscale", Number(args[1] ?? 50));
     case "ip": {
       const ip = tailscale.tailscaleIp4();
       if (!ip) fail("no tailscale IPv4 — is tailscale up?");
@@ -266,7 +299,7 @@ async function cmdTailscale(args) {
       fail(`unknown serve action ${JSON.stringify(subAction)} — use status | on | off`);
     }
     default:
-      fail(`unknown action ${JSON.stringify(action)} — use status | ip | connect | ping [host] | serve [status|on|off]`);
+      fail(`unknown action ${JSON.stringify(action)} — use start | stop | restart | logs | status | ip | connect | ping [host] | serve [status|on|off]`);
   }
 }
 
@@ -287,13 +320,13 @@ async function cmdRelay(args, options) {
       };
       saveConfig(config);
       console.log(`relay configured: ${normalized}`);
-      console.log("apply it: dsh --profile mobile service restart");
+      console.log("apply it: dsh --profile mobile relay start");
       return 0;
     }
     case "disconnect": {
       config.mode = "tailscale";
       saveConfig(config);
-      console.log("switched back to tailscale mode; run: dsh --profile mobile service restart");
+      console.log("switched back to tailscale mode; run: dsh --profile mobile tailscale start");
       return 0;
     }
     case "status": {
@@ -306,15 +339,24 @@ async function cmdRelay(args, options) {
       } else {
         console.log("tunnel   : no state file (start the service first)");
       }
+      console.log(serviceStateLine());
       return 0;
     }
+    case "start":
+      return await serviceLifecycle("start", "relay", 50);
+    case "stop":
+      return await serviceLifecycle("stop", "relay", 50);
+    case "restart":
+      return await serviceLifecycle("restart", "relay", 50);
+    case "logs":
+      return await serviceLifecycle("logs", "relay", Number(args[1] ?? 50));
     case "ping": {
       const health = await relayHealth(config);
       console.log(health.reachable ? health.detail : `unreachable: ${health.detail}`);
       return health.reachable ? 0 : 1;
     }
     default:
-      fail(`unknown action ${JSON.stringify(action)} — use connect <url> | disconnect | status | ping`);
+      fail(`unknown action ${JSON.stringify(action)} — use connect <url> | disconnect | start | stop | restart | logs | status | ping`);
   }
 }
 

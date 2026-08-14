@@ -40,19 +40,19 @@ const SUBCOMMANDS = [
   },
   {
     name: "service",
-    description: "manage the resident dsh web instance (a) — start | stop | restart | status | logs [n]",
+    description: "low-level lifecycle in the currently configured transport (auto-start templates use this) — prefer tailscale start / relay start",
     argsDesc: "<action> [n]",
     options: [],
   },
   {
     name: "tailscale",
-    description: "tailscale transport (b) — status | ip | connect | ping [host] | serve [status|on|off]",
+    description: "tailscale transport (b) — start | stop | restart | logs [n] | status | ip | connect | ping [host] | serve [on|off|status]",
     argsDesc: "<action> [args...]",
     options: [],
   },
   {
     name: "relay",
-    description: "VPS relay transport (c) — connect <relay-url> | disconnect | status | ping",
+    description: "VPS relay transport (c) — connect <relay-url> | disconnect | start | stop | restart | logs [n] | status | ping",
     argsDesc: "<action> [relay-url]",
     options: [
       ["--token <token>", "instance token issued by the relay owner"],

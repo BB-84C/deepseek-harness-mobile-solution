@@ -265,3 +265,22 @@ deepseek-harness-mobile-solution/
 - 教训（并入 M2/M4 加固项）：**移动链路必须保证每 session 单写者**——远程消息一律通过常驻
   gateway 的 inbox splice 路径注入，禁止对同一 session 再开第二个可写实例（`attach` 与
   gateway 不得同时写同一 session）。后续在 dsh-mobile-server 增加防线（单写者锁 / 写前 seq 校验）。
+
+**2026-08-14 第二次事故（同日，测试 relay/tailscale 期间，已修复）**
+
+- 现象：同 session 再次报 `seq gap in committed region at line 32270 (expected 408551, got 408550)`
+  （seq 只回退 1）。
+- 根因实证：测试期间同一机器同时运行了 **3080 与 3090 两个 web 实例**（service.log 可见两轮
+  `dsh web: http://127.0.0.1:3080/3090`）。dsh 官方 resume 路径每次会在日志末尾追加
+  `session/end-seed`（构造期标记，见 dsh-session/lib/types/index.js:429）：实例 A resume 写入
+  `end-seed@408550`，实例 B 用旧 seq 计数器写入 `agent/inbox/spliced@408550`（用户消息），
+  重复占用 seq。hydrate 插件本身只读（`inspect`）非元凶。
+- 修复：删除重复占位的 1 行（空数据的 end-seed），保留完整 splice（用户消息+rpcId），
+  442,108 事件连续，官方校验通过。
+- 运维规则（立即执行）：**同一 $DSH_HOME 只允许一个 resident web 实例**；测试 relay 时远端
+  通过 gateway/隧道访问同一实例，不要为测试另起第二个 web 端口实例。`attach` 与 gateway
+  不得同时写同一 session。
+- 工具：`scripts/repair-session.cjs`（+ `.ps1`/`.sh` 包装，三平台，仅依赖 Node≥22 内置 zlib）：
+  `check [path]` 全量体检（退出码 0 健康/1 损坏）；
+  `repair [--dry-run] <session.jsonl.zstd>` 自动备份（`.corrupt-<ts>.bak`）→ 删除陈旧重叠块 →
+  全量 seq+turn 校验 → 写回。已用两次事故的真实损坏文件回归验证（输出与手工修复字节一致）。
