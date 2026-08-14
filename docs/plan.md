@@ -194,8 +194,8 @@ update                        升级两个插件（转发 dsh plugin update）�
 | M0 | 基础 context + 规划 | 调研 dsh 源码与 opencode-mobile；git 仓库脚手架；本 plan | ✅ 进行中（本 commit 收尾） |
 | M1 | dsh-mobile-cli 插件 | `dsh --profile mobile` 命令族 + service 管理 + config/status/url/doctor | ✅ 本机实测通过 |
 | M2 | dsh-mobile-server 插件 | gateway 反代 + 设备认证 + tailscale 绑定 + 常驻服务联调 | 🔄 gateway 实现中（subagent） |
-| M3 | relay + 隧道 | dsh-relay 服务 + 实例隧道客户端 + 目录/多路复用 | ⬜ |
-| M4 | 设备配对与安全加固 | 配对码兑换、哈希存储、撤销踢会话、限速、文档化威胁模型 | ⬜ |
+| M3 | relay + 隧道 | dsh-relay 服务 + 实例隧道客户端 + 目录/多路复用 | ✅ 代码完成，VPS 实测通过 |
+| M4 | 设备配对与安全加固 | 配对码兑换、哈希存储、撤销踢会话、限速、文档化威胁模型 | ✅ 代码完成，实测通过 |
 | M5 | 部署与文档 | tailscale/VPS relay 部署脚本与教程、插件安装说明、三平台自启模板 | 🔄 文档/脚本已写，实测待 M7 |
 | M6 | 移动 UI/UX specs | mobile-web / mobile-app（Android+iOS）specs（交其他 agent） | ⬜ |
 | M7 | 端到端验收 | 本机 tailscale P2P 实测 + relay 模拟实测；README 完善；发布前检查 | ✅ 本机全链路通过（详见 docs/acceptance.md；第二设备/VPS/多平台项待用户复核） |
@@ -203,7 +203,12 @@ update                        升级两个插件（转发 dsh plugin update）�
 当前进度：**全部里程碑代码完成，本机端到端验收通过**（docs/acceptance.md，2026-08-14）：
 tailscale 点对点（gateway 绑 tailnet 可达、配对、官方 SPA 代理、撤销踢会话、限速、开放重定向防护）
 与 relay fan-in（本机真实 relay + 隧道 + 深链配对 + 官方 SPA 全链路）均实测通过；防误杀红线实测通过。
-剩余仅用户侧复核项：第二设备真机浏览器、真实 VPS 部署、macOS/Linux 实测、双实例 fan-in。
+2026-08-14 更新：**真实 VPS relay 部署 + 公网入口实测通过**（`https://dsh.bb84.ai/instance/<id>` +
+`dsh_instance` 路由 cookie + picker）。期间修复 relay 模式三个关键 bug（见 §8）：
+(1) 隧道 fetch 自动跟随重定向吞掉 302 的 Set-Cookie → 手机配对"成功但显示 Sign in failed"；
+(2) auth 页无错误参数时误显 "Sign in failed."；
+(3) registry 空闲流定时器以 `undefined` 重武装（0ms 触发）→ 所有跨 tick 的大响应被立即销毁（空回复/CF 502）。
+剩余仅用户侧复核项：手机真机浏览器配对、第二设备 tailscale、macOS/Linux 实测、双实例 fan-in。
 
 ## 5. 仓库布局
 
@@ -284,3 +289,26 @@ deepseek-harness-mobile-solution/
   `check [path]` 全量体检（退出码 0 健康/1 损坏）；
   `repair [--dry-run] <session.jsonl.zstd>` 自动备份（`.corrupt-<ts>.bak`）→ 删除陈旧重叠块 →
   全量 seq+turn 校验 → 写回。已用两次事故的真实损坏文件回归验证（输出与手工修复字节一致）。
+
+**2026-08-14 第三次事故（同日，relay 公网实测期间，已修复）**
+
+- 现象：手机经 `https://dsh.bb84.ai/instance/woody/` 配对后显示 "Sign in failed." 并停留
+  `/mobile/auth`；服务端日志却显示 `login_success`（配对实际成功）。随后发现 relay 转发大响应
+  （dsh web 首页 HTML）一律空回复/502，小响应（302）正常。
+- 根因（三个叠加 bug）：
+  1. **隧道 fetch 自动跟随重定向**：relay-tunnel 用 undici fetch 转发请求，默认 `redirect:'follow'`
+     在隧道内部消费 gateway 的 302，且不会把 302 的 Set-Cookie 带给后续请求 → 手机永远收不到
+     会话 cookie，POST 的"最终响应"变成未登录的 auth 页。
+  2. **auth 页误显错误**：`authErrorText(null)` 落入默认分支 → 每次打开 auth 页都显示
+     "Sign in failed."。
+  3. **registry 空闲流定时器 0ms 重武装**（核心）：`stream.reset()` 内
+     `setTimeout(fn, this.idleTimeoutMs)` 的 `this` 是 stream 对象（无该属性）→ `undefined` →
+     0ms 定时器。res 帧到达后 reset() 立刻在下个 tick 触发 idle 超时 → `abortPending` →
+     `res.destroy()` → 客户端空回复、Caddy/CF 502。本地环回测试因 res/chunk/end 在同一 TCP 段
+     同步处理（chunk/end 抢在 0ms 定时器前）而无法暴露；经 CF/Caddy 的帧跨 tick 到达必炸。
+- 修复：隧道 `redirect:'manual'`；`authErrorText` 空参数返回空串；registry 在 openStream 闭包
+  捕获 `idleTimeoutMs`；relay 增加僵尸 socket 守卫与失败 500 应答；新增跨 tick 回归测试
+  （res 与 chunk/end 分 40ms 两 tick 发送）。`relay connect` 同时默认实例 id = 净化后的
+  tailscale/OS 主机名。
+- 教训：**setTimeout(fn, undefined) 等价 0ms，不报错**——凡是"默认值 + 定时器"的组合都要在
+  闭包里捕获实参；**隧道必须是透明代理**（fetch 的 redirect 默认值只适合浏览器语义）。
