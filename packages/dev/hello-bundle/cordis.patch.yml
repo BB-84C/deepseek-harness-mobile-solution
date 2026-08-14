@@ -1,0 +1,5 @@
+# Dev-only probe bundle for the dsh mobile integration test.
+# Composed into the `mobile` profile; prints cmdlineArgs and exits 0.
+- insert:
+    - id: hello-startup
+      name: '@bb-84c/hello-bundle/startup'

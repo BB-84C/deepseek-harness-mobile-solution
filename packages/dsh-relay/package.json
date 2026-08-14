@@ -1,0 +1,19 @@
+{
+  "name": "@bb-84c/dsh-relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "VPS relay for the deepseek-harness mobile solution: fans in many local dsh instances over outbound WebSocket tunnels and multiplexes client HTTP requests over them.",
+  "bin": {
+    "dsh-relay": "bin/relay.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node bin/relay.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {}
+}

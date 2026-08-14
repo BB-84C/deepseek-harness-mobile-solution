@@ -58,7 +58,16 @@
 5. **Web 无认证**：官方 webserver 是裸 HTTP，无任何认证层（因为它只允许 loopback）。
    → gateway 的认证是我们必须补齐的核心。
 6. **沙箱提示**：本机 dsh 进程内插件不受 agent 工具沙箱限制；但本 agent 的 pwsh 工具
-   受沙箱约束（曾挡住 tailscale 命名管道、git 管道、gh 网络），测试时需要按需升级重试。
+   曾受沙箱约束（tailscale 命名管道、git 管道、gh 网络），已随 danger-full-access 解除。
+7. **插件安装机制（已实测验证）**：`dsh plugin --profile <name> add link:/file:<Windows 绝对路径>`
+   在 pnpm 10.12.4 上是坏的（盘符被当 URL host 丢弃，junction 悬空）。可用模式（探针包
+   `packages/dev/hello-bundle` 实测通过）：
+   profile 目录内建 `vendor-packages` junction → 仓库 `packages/`；清单依赖写成穿过 junction 的
+   相对 spec `link:./vendor-packages/<dir>/<pkg>`；再 `dsh plugin --profile <name> install`
+   触发官方 reconcile 把包加入 `dsh.profile.bundles`。junction 使 Node 从包的真实目录解析依赖，
+   故仓库根需要 `pnpm install`（提供 commander / dsh-cmdline 等）。
+   验证结果：`dsh --profile mobile hello world` → `HELLO-ARGS ["hello","world"]`（exit 0），
+   cmdlineArgs 透传与 appExit 退出全链路 ✅。installer 脚本（M5）将实现此模式。
 
 opencode-mobile-solution 调研结论见 `docs/research/opencode-mobile-architecture.md`，要点：
 

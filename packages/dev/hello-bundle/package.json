@@ -1,0 +1,21 @@
+{
+  "name": "@bb-84c/hello-bundle",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Dev probe: proves the `dsh --profile mobile` boot path (link: install, bundle composition, cmdlineArgs flow, appExit) before the real CLI plugin lands. Not shipped.",
+  "type": "module",
+  "exports": {
+    "./startup": "./startup.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "startup.js",
+    "cordis.patch.yml"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
