@@ -1,7 +1,7 @@
 // Token store: issues opaque tokens, persists only their SHA-256 hashes.
 // A raw token is 32 random bytes (64 hex chars) and is shown exactly once.
 
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 
@@ -101,14 +101,26 @@ export class TokenStore {
   }
 
   // Verify a raw token; returns the live entry or null. Updates lastUsedAt.
+  // Constant-time: hashes the presented token, then compares against every
+  // stored hash with timingSafeEqual (never short-circuits on the first match,
+  // so lookup time leaks nothing about which prefix matched).
   verify(raw) {
     if (typeof raw !== 'string' || raw.length === 0) return null
     const hash = sha256hex(raw)
-    const entry = this.entries.find((e) => e.hash === hash)
-    if (!entry || entry.revoked) return null
-    entry.lastUsedAt = Date.now()
+    const presented = Buffer.from(hash, 'hex')
+    let matched = null
+    for (const entry of this.entries) {
+      if (entry.revoked) continue
+      if (Buffer.byteLength(entry.hash, 'hex') !== presented.length) continue
+      if (timingSafeEqual(Buffer.from(entry.hash, 'hex'), presented)) {
+        matched = entry
+        break
+      }
+    }
+    if (!matched) return null
+    matched.lastUsedAt = Date.now()
     this._saveSoon()
-    return entry
+    return matched
   }
 
   // Revoke by unique hash prefix; returns the live entry or null.

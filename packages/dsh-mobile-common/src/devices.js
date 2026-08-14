@@ -10,7 +10,7 @@
 // All functions accept an injectable `now` clock and `random` source so the
 // pairing flow is deterministic under test.
 import fs from 'node:fs';
-import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { mobilePaths } from './home.js';
 import { atomicWriteJson } from './fsutil.js';
 
@@ -145,8 +145,19 @@ export function createDeviceStore(deps = {}) {
     const t = opts.now ?? now();
     if (typeof rawToken !== 'string' || !rawToken) return null;
     const hash = sha256Hex(rawToken);
+    const presented = Buffer.from(hash, 'hex');
     const devices = loadDevices();
-    const device = devices.find((d) => d.tokenHash === hash && !d.revoked);
+    let device = null;
+    // Constant-time: compare against every active token hash without
+    // short-circuiting, so lookup time leaks nothing.
+    for (const d of devices) {
+      if (d.revoked || typeof d.tokenHash !== 'string') continue;
+      if (Buffer.byteLength(d.tokenHash, 'hex') !== presented.length) continue;
+      if (timingSafeEqual(Buffer.from(d.tokenHash, 'hex'), presented)) {
+        device = d;
+        break;
+      }
+    }
     if (!device) return null;
     device.lastSeenAt = t;
     atomicWriteJson(paths().devicesPath, devices);
@@ -178,8 +189,29 @@ export function createDeviceStore(deps = {}) {
     return device;
   }
 
-  return { issuePairing, completePairing, verifyDevice, listDevices, revokeDevice };
+  /**
+   * Rotate an existing device's long-lived token (gateway `POST /mobile/api/token`,
+   * owner-only recovery). Generates a fresh raw token, persists only its SHA-256
+   * hash, and returns the raw token once — it is never written to disk and cannot
+   * be recovered afterwards. Returns null when the id is unknown.
+   * @param {string} id
+   * @param {{ now?: number, rawToken?: string }} [opts]
+   * @returns {{ rawToken: string, device: object }|null}
+   */
+  function rotateDeviceToken(id, opts = {}) {
+    const t = opts.now ?? now();
+    const rawToken = opts.rawToken ?? random.token();
+    const devices = loadDevices();
+    const device = devices.find((d) => d.id === id);
+    if (!device) return null;
+    device.tokenHash = sha256Hex(rawToken);
+    device.lastSeenAt = t;
+    atomicWriteJson(paths().devicesPath, devices);
+    return { rawToken, device };
+  }
+
+  return { issuePairing, completePairing, verifyDevice, listDevices, revokeDevice, rotateDeviceToken };
 }
 
 // Convenience default store bound to the process environment.
-export const { issuePairing, completePairing, verifyDevice, listDevices, revokeDevice } = createDeviceStore();
+export const { issuePairing, completePairing, verifyDevice, listDevices, revokeDevice, rotateDeviceToken } = createDeviceStore();

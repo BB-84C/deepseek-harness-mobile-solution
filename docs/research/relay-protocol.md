@@ -200,9 +200,8 @@ Upgrade: websocket
 3. **撤销即时生效**：撤销 instance token 立即关闭其隧道并终止其全部在途请求
    （客户端收到 `502 instance-offline`）；撤销 client token 立即失效其目录访问
    （`/relay/api/targets` 返回 401）。
-4. **比较**：校验使用 `crypto.timingSafeEqual` 语义的哈希查找（见 `tokens.js` 的
-   `verify` 走哈希比对而非明文前缀匹配）。实际当前实现为哈希字符串等值查找，需在
-   M4 安全加固时换为常量时间比较。
+4. **比较**：校验使用 `crypto.timingSafeEqual` 的常量时间哈希比对（`tokens.js` 的
+   `verify` 先哈希呈现的 token，再与全部存储哈希逐一 timing-safe 比较，不短路）。
 5. **bootstrap 一次性**：owner 引导密钥只生效一次；泄漏后需重启生成新密钥。
 6. **passkey（M4）**：WebAuthn owner 登录为后续里程碑，当前 `/relay/api/passkey/*`
    返回 501。

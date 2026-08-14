@@ -72,7 +72,8 @@ cookie.
 ## Test
 
 ```sh
-node --test test/
+node --test
+# or: npm test
 ```
 
 Runs fully offline (no `npm install` needed).
