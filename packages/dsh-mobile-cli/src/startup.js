@@ -90,6 +90,12 @@ const SUBCOMMANDS = [
     argsDesc: "",
     options: [],
   },
+  {
+    name: "attach",
+    description: "print how to attach the gateway to your PRIMARY dsh web (one-instance principle: live-stream its sessions, avoid cross-instance resume races)",
+    argsDesc: "",
+    options: [],
+  },
 ];
 
 /**

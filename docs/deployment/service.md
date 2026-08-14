@@ -43,6 +43,31 @@ frontend, the key never travels to it.
 - `.env` files also work: dsh's own layered env loads
   `<invoking-directory>/.env` then `$DSH_HOME/.env` at launch.
 
+## One instance, one registry — the attach mode
+
+dsh persists sessions as **single-writer logs**. Two dsh web processes on the
+same machine keep separate session registries, and resuming a session that
+another live process is writing races its writer — the failure mode looks
+like `corrupt session log: seq gap in committed region`. The fix is the
+one-instance principle: **the phone must reach the instance that owns the
+sessions.**
+
+If you already run a primary dsh web (your daily driver), attach the gateway
+to IT instead of running a second instance:
+
+```sh
+dsh --profile mobile attach        # prints the exact env/flags for your launch
+```
+
+That is: stop the separate resident service, then launch your primary dsh web
+with `DSH_MOBILE_INSTANCE=1` (activates the in-profile gateway) and the
+printed `--trusted-host` flags. The phone then live-streams every session of
+that instance — including ones that are running right now.
+
+The resident-service model (`service start`) remains the right choice when the
+machine has NO other dsh web: the resident instance is then the single owner
+of all sessions and the phone streams them live from the first prompt.
+
 ## Start on login (optional)
 
 The service itself is process-detached (survives the launching shell); the

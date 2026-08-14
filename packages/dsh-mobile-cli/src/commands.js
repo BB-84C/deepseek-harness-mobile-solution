@@ -407,6 +407,31 @@ async function cmdDoctor() {
   return worst;
 }
 
+async function cmdAttach() {
+  const config = mustConfig();
+  const host = tailscale.tailscaleHostname();
+  const ip = tailscale.tailscaleIp4();
+  const port = config.gatewayPort ?? 3081;
+  console.log("ONE-INSTANCE PRINCIPLE — attach the gateway to your PRIMARY dsh web instance.");
+  console.log("The phone then live-streams the sessions that instance owns; a second instance");
+  console.log("creates cross-instance resume races that corrupt live session logs.");
+  console.log("");
+  console.log("1. stop the separate resident service (if running):");
+  console.log("   dsh --profile mobile service stop");
+  console.log("");
+  console.log("2. launch your primary dsh web (your normal launch command) with these additions:");
+  console.log(`   environment: DSH_MOBILE_INSTANCE=1  DSH_MOBILE_GATEWAY_PORT=${port}`);
+  console.log(`   flags: --trusted-host ${host} --trusted-host ${ip}`);
+  console.log(`          --trusted-host ${host}:${port} --trusted-host ${ip}:${port}`);
+  console.log("");
+  console.log("   (the web profile already carries the gateway plugin — the env activates it in-process)");
+  console.log("");
+  console.log("3. phone URL (unchanged):");
+  console.log(`   ${await mobileUrl(config)}`);
+  console.log("4. every session of that instance — including live ones — is immediately on the phone.");
+  return 0;
+}
+
 async function cmdUpdate() {
   let code = 0;
   for (const profile of ["mobile", "web"]) {
@@ -433,6 +458,7 @@ const COMMANDS = {
   config: cmdConfig,
   doctor: cmdDoctor,
   update: cmdUpdate,
+  attach: cmdAttach,
 };
 
 export async function runCommand(name, args, options) {
