@@ -92,7 +92,7 @@ async function cmdStatus() {
   ensureMobileDirs();
   console.log(`mobile home : ${resolveMobileHome()}`);
   console.log(`mode        : ${config.mode}`);
-  console.log(`web port    : ${config.webPort} (loopback, official dsh web)`);
+  console.log(`web port    : 3080 (loopback, official dsh web)`);
   console.log(`gateway port: ${config.gatewayPort}`);
 
   const svc = service.serviceStatus({ config });
@@ -136,9 +136,10 @@ async function cmdService(args) {
   const logPath = join(logsDir(), "service.log");
 
   /** One-instance guard: refuse to start when the port is held by a process
-   * that is NOT our tracked instance (i.e. another dsh web). */
+   * that is NOT our tracked instance (i.e. another dsh web). The resident
+   * instance always owns 3080 — there is deliberately no port knob. */
   async function startGuarded() {
-    const port = config.webPort ?? 3080;
+    const port = 3080;
     const occupied = !(await checkPortFree(port)).free;
     if (occupied && !service.serviceStatus({ config }).running) {
       console.error(`port ${port} is occupied by another process — most likely your existing dsh web.`);

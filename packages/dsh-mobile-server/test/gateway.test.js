@@ -96,9 +96,9 @@ before(async () => {
   gateway = createGateway({
     env: testEnv,
     pid: 424242,
+    targetPort,
     config: {
       mode: 'tailscale',
-      webPort: targetPort,
       gatewayPort: 3081,
       relay: {},
       tailscale: {},
@@ -377,9 +377,9 @@ test('sessions survive a gateway restart (persisted store, hashed sids)', async 
   const gw2 = createGateway({
     env: testEnv,
     pid: 424243,
+    targetPort,
     config: {
       mode: 'tailscale',
-      webPort: targetPort,
       gatewayPort: 3082,
       relay: {},
       tailscale: {},
@@ -396,6 +396,73 @@ test('sessions survive a gateway restart (persisted store, hashed sids)', async 
     assert.strictEqual(proxied.json().url, '/api/hello?persisted=1');
   } finally {
     await gw2.stop();
+  }
+});
+
+test('session-live guard blocks prompts to sessions another instance is writing', async () => {
+  // fresh log file for a session we do NOT own
+  const guardHome = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-guard-home-'));
+  const logDir = path.join(guardHome, 'sessions', '--D-work--', 'session-fresh');
+  await fs.mkdir(logDir, { recursive: true });
+  const logFile = path.join(logDir, 'session.jsonl.zstd');
+  await fs.writeFile(logFile, 'x');
+
+  const gw3 = createGateway({
+    env: testEnv,
+    pid: 424244,
+    targetPort,
+    config: {
+      mode: 'tailscale',
+      gatewayPort: 3083,
+      relay: {},
+      tailscale: {},
+      auth: { sessionTtlDays: 30 },
+    },
+    devices: store,
+    tailscale: FAKE_TS,
+    relayStatus: () => null,
+    resumeGuard: { dshHome: guardHome, sessions: { get: () => undefined } },
+  });
+  const started3 = await gw3.start();
+  try {
+    // pair a device against gw3
+    const pending = store.issuePairing({ name: 'guard-phone' });
+    const pairRes = await request('/mobile/pair', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ code: pending.pairingCode }),
+    }, started3.port);
+    const token = pairRes.json().token;
+
+    const envelope = JSON.stringify({
+      type: 'client-request',
+      rpcId: 'g1',
+      method: 'session.prompt',
+      payload: { sessionId: 'session-fresh', mode: 'queue', content: [{ type: 'text', text: 'hi' }] },
+    });
+
+    // fresh mtime -> blocked with a clear error
+    await fs.utimes(logFile, Date.now() / 1000, Date.now() / 1000);
+    const blocked = await request('/api/session.prompt', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: envelope,
+    }, started3.port);
+    assert.strictEqual(blocked.status, 409);
+    assert.strictEqual(blocked.json().error, 'session-live-elsewhere');
+
+    // stale mtime -> allowed through to the target
+    await fs.utimes(logFile, (Date.now() - 60000) / 1000, (Date.now() - 60000) / 1000);
+    const allowed = await request('/api/session.prompt', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: envelope,
+    }, started3.port);
+    assert.strictEqual(allowed.status, 200);
+    assert.strictEqual(allowed.json().method, 'POST');
+  } finally {
+    await gw3.stop();
+    await fs.rm(guardHome, { recursive: true, force: true });
   }
 });
 

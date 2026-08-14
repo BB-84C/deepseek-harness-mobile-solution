@@ -23,6 +23,7 @@ import { mobilePaths, ensureMobileDirs } from '@bb-84c/dsh-mobile-common/home.js
 import { atomicWriteJson } from '@bb-84c/dsh-mobile-common/fsutil.js';
 import { readRelayStatus } from '@bb-84c/dsh-mobile-common/relay-status.js';
 import { tailscaleIp4, tailscaleHostname } from '@bb-84c/dsh-mobile-common/tailscale.js';
+import { checkResumeSafe } from './session-guard.js';
 
 const { sha256Hex } = devices;
 
@@ -31,6 +32,9 @@ const SESSION_COOKIE = 'dsh_mobile_sid';
 const RATE_LIMIT = 10; // auth attempts per IP
 const RATE_WINDOW_MS = 60 * 1000;
 const WEB_PROBE_TIMEOUT_MS = 2000;
+// Session-live guard body buffer cap: envelopes larger than this (image
+// attachments on session.prompt) pass through without the guard.
+const GUARD_BODY_LIMIT = 64 * 1024;
 
 // Hop-by-hop headers that must not be forwarded across the proxy boundary.
 const HOP_BY_HOP = new Set([
@@ -223,13 +227,14 @@ export function createGateway(deps = {}) {
     fetchImpl = globalThis.fetch,
     tailscale = null,
     relayStatus = readRelayStatus,
+    resumeGuard = null,
   } = deps;
 
   const effectiveConfig = config ?? loadConfig(env).config;
   const paths = () => mobilePaths(env);
   const port = resolvePort(env, effectiveConfig);
   const host = resolveHost(effectiveConfig);
-  const target = targetPort ?? effectiveConfig.webPort;
+  const target = targetPort ?? 3080;
   const auditLogPath = logPath ?? path.join(paths().logsDir, 'gateway.log');
   const sessionTtlDays = (effectiveConfig.auth && effectiveConfig.auth.sessionTtlDays) || 30;
   const sessionTtlMs = sessionTtlDays * 86400 * 1000;
@@ -766,7 +771,7 @@ export function createGateway(deps = {}) {
 
   // --- proxy path ----------------------------------------------------------
 
-  function forward(req, res, deviceId) {
+  function forward(req, res, deviceId, preReadBody = null) {
     const headers = filterHeaders(req.headers, HOP_BY_HOP);
     const proxyReq = http.request(
       {
@@ -808,11 +813,15 @@ export function createGateway(deps = {}) {
       else res.destroy();
     });
     req.on('aborted', () => proxyReq.destroy());
-    req.pipe(proxyReq);
+    if (preReadBody !== null) {
+      proxyReq.end(preReadBody);
+    } else {
+      req.pipe(proxyReq);
+    }
     trackSocket(deviceId, req.socket);
   }
 
-  function handleProxy(req, res) {
+  async function handleProxy(req, res) {
     const device = authenticate(req);
     if (!device) {
       const pathname = new URL(req.url, 'http://localhost').pathname;
@@ -821,6 +830,41 @@ export function createGateway(deps = {}) {
       }
       return redirect(res, `/mobile/auth?next=${encodeURIComponent(req.url)}`);
     }
+
+    // Session-live guard: opening/resuming a session whose log another dsh
+    // instance is actively writing corrupts it (single-writer logs). Check
+    // before forwarding; bodies over the buffer cap pass through unguarded.
+    const pathname = new URL(req.url, 'http://localhost').pathname;
+    if (
+      req.method === 'POST' &&
+      (pathname === '/api/session.prompt' || pathname === '/api/session.create') &&
+      resumeGuard !== null
+    ) {
+      let raw = null;
+      try {
+        raw = await readBody(req, GUARD_BODY_LIMIT);
+      } catch {
+        raw = null;
+      }
+      if (raw !== null) {
+        let sessionId;
+        try {
+          sessionId = JSON.parse(raw)?.payload?.sessionId;
+        } catch {
+          sessionId = undefined;
+        }
+        const verdict = await checkResumeSafe(
+          { dshHome: resumeGuard.dshHome, sessions: resumeGuard.sessions, now: resumeGuard.now },
+          sessionId,
+        );
+        if (!verdict.safe) {
+          audit('session_guard_block', { sessionId: sessionId ?? '', reason: verdict.reason });
+          return json(res, 409, { error: 'session-live-elsewhere', message: verdict.reason });
+        }
+        return forward(req, res, device.id, raw);
+      }
+    }
+
     return forward(req, res, device.id);
   }
 
@@ -971,7 +1015,15 @@ export async function startGateway({ ctx } = {}) {
     // eslint-disable-next-line no-console
     console.warn(`[dsh-mobile-server] config warnings: ${loaded.errors.join('; ')}`);
   }
-  const gateway = createGateway({ env, config: loaded.config });
+  // Session-live guard inputs: the live session store (sessions we own) and
+  // the shared harness home (where session logs live). Null when the service
+  // is absent — the guard then degrades to pass-through.
+  const sessionsService = ctx?.get?.('sessions');
+  const resumeGuard =
+    typeof sessionsService?.get === 'function'
+      ? { dshHome: path.dirname(mobilePaths(env).home), sessions: sessionsService }
+      : null;
+  const gateway = createGateway({ env, config: loaded.config, resumeGuard });
   await gateway.start();
   return { stop: () => gateway.stop() };
 }

@@ -316,7 +316,9 @@ export function createService(deps = {}) {
       launchBin = process.execPath;
     }
     args.push('--profile', 'web');
-    if (config.webPort) args.push('--port', String(config.webPort));
+    // The resident instance ALWAYS owns the official port 3080 (one-instance
+    // principle). No config knob exists on purpose: a second dsh web on 3090
+    // would reintroduce the split-brain that corrupts live session logs.
     for (const authority of authorities || []) {
       args.push('--trusted-host', authority);
     }

@@ -12,6 +12,10 @@ import { startTunnel } from "./relay-tunnel.js";
 import { loadConfig } from "@bb-84c/dsh-mobile-common/config.js";
 
 export const name = "mobile-gateway";
+// The live session store feeds the session-live guard (blocks opening a
+// session another instance is actively writing). Activation waits for it;
+// the env gate below keeps ordinary `dsh web` runs inert.
+export const inject = ["sessions"];
 
 export function apply(ctx) {
   if (process.env.DSH_MOBILE_INSTANCE !== "1") return;

@@ -15,8 +15,11 @@ dsh --profile mobile service status     # running? pid? gateway healthy?
 dsh --profile mobile service logs       # last 50 lines; logs [n] for n lines
 ```
 
-- The service spawns `dsh --profile web --port <webPort> --trusted-host ...`
-  with env `DSH_MOBILE_INSTANCE=1` and a fresh per-start token.
+- The service spawns `dsh --profile web --trusted-host ...` with env
+  `DSH_MOBILE_INSTANCE=1` and a fresh per-start token. It always binds the
+  official port **3080** — there is deliberately no port knob (a second dsh
+  web on another port would reintroduce the split-brain that corrupts live
+  session logs).
 - State: pidfile `$DSH_HOME/mobile/pid.json`, logs
   `$DSH_HOME/mobile/logs/service.log`, per-instance sidecar
   `$DSH_HOME/mobile/instances/<pid>.json`.
@@ -24,8 +27,6 @@ dsh --profile mobile service logs       # last 50 lines; logs [n] for n lines
   start token, and sidecar all match the pidfile. Anything else — including a
   plain `dsh web` you started yourself — is refused loudly. This is the red
   line; do not bypass it.
-- `webPort` defaults to 3080 (the official default). If something else already
-  occupies it, change it: `dsh --profile mobile config set webPort 3090`.
 
 ## Environment & API keys
 
@@ -52,10 +53,10 @@ like `corrupt session log: seq gap in committed region`. The fix is the
 one-instance principle: **the phone must reach the instance that owns the
 sessions** — and `service start` enforces it for you:
 
-- **Port free** (the normal case): the resident instance starts on
-  `webPort` (default 3080) and becomes the machine's single dsh web. Local
-  usage is unchanged (`http://127.0.0.1:3080/`); the phone live-streams every
-  session — past and running — from that one instance.
+- **Port free** (the normal case): the resident instance starts on **3080**
+  and becomes the machine's single dsh web. Local usage is unchanged
+  (`http://127.0.0.1:3080/`); the phone live-streams every session — past and
+  running — from that one instance.
 - **Port occupied by another process** (your old dsh web): `service start`
   **refuses with exact instructions** — stop that instance, then re-run the
   same command. Nothing is touched and nothing is lost: sessions live on disk
@@ -118,7 +119,7 @@ systemctl --user enable --now dsh-mobile.service
 
 | Port | Role | Bound to |
 | --- | --- | --- |
-| `webPort` (3080) | official dsh web | 127.0.0.1 only (unchanged, by dsh's design) |
+| `3080` | official dsh web (fixed — no knob) | 127.0.0.1 only (unchanged, by dsh's design) |
 | `gatewayPort` (3081) | mobile gateway | tailscale IP or 0.0.0.0 (tailscale mode) / 127.0.0.1 (relay mode) |
 
 The gateway proxies to the web port on loopback; the official web never

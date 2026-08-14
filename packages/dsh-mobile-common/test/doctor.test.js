@@ -39,7 +39,7 @@ test('doctor reports ok for a healthy tailscale setup', async () => {
 
 test('doctor flags bad config, old node, missing binaries and busy ports', async () => {
   const results = await diagnose({
-    config: { ...defaultConfig(), mode: 'bogus', webPort: 0 },
+    config: { ...defaultConfig(), mode: 'bogus' },
     probes: {
       ...happyProbes,
       nodeVersion: '18.0.0',

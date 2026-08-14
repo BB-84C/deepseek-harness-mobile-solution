@@ -31,7 +31,6 @@ export function defaultConfig() {
   return {
     version: CONFIG_VERSION,
     mode: 'tailscale',
-    webPort: 3080,
     gatewayPort: 3081,
     hostname: '',
     tailscale: { interfaceIp: '' },
@@ -56,7 +55,6 @@ export function normalizeConfig(raw) {
   const out = { ...d };
   if (typeof raw.version === 'number') out.version = raw.version;
   if (typeof raw.mode === 'string') out.mode = raw.mode;
-  if (raw.webPort !== undefined) out.webPort = raw.webPort;
   if (raw.gatewayPort !== undefined) out.gatewayPort = raw.gatewayPort;
   if (typeof raw.hostname === 'string') out.hostname = raw.hostname;
   out.tailscale = { ...d.tailscale, ...(raw.tailscale && typeof raw.tailscale === 'object' ? raw.tailscale : {}) };
@@ -81,7 +79,6 @@ export function validateConfig(config) {
   if (!MODES.includes(config.mode)) {
     errors.push(`mode must be one of: ${MODES.join(', ')}`);
   }
-  if (!isPort(config.webPort)) errors.push('webPort must be an integer 1-65535');
   if (!isPort(config.gatewayPort)) errors.push('gatewayPort must be an integer 1-65535');
   if (typeof config.hostname !== 'string') errors.push('hostname must be a string');
 
@@ -172,7 +169,6 @@ export function getConfigValue(config, key) {
 
 const KEY_VALIDATORS = {
   mode: (v) => (MODES.includes(v) ? null : `mode must be one of: ${MODES.join(', ')}`),
-  webPort: (v) => (isPort(v) ? null : 'webPort must be an integer 1-65535'),
   gatewayPort: (v) => (isPort(v) ? null : 'gatewayPort must be an integer 1-65535'),
   hostname: (v) => (typeof v === 'string' ? null : 'hostname must be a string'),
   'tailscale.interfaceIp': (v) => (typeof v === 'string' ? null : 'tailscale.interfaceIp must be a string'),

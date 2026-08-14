@@ -187,11 +187,11 @@ export async function diagnose({ config, probes } = {}) {
       ? { level: 'ok', check: 'gateway port', detail: `${config.gatewayPort} free` }
       : { level: 'error', check: 'gateway port', detail: `${config.gatewayPort}: ${gw.error}` },
   );
-  const web = await p.checkPortFree(config && config.webPort);
+  const web = await p.checkPortFree(3080);
   results.push(
     web.free
-      ? { level: 'ok', check: 'web port', detail: `${config.webPort} free` }
-      : { level: 'error', check: 'web port', detail: `${config.webPort}: ${web.error}` },
+      ? { level: 'ok', check: 'web port', detail: '3080 free' }
+      : { level: 'error', check: 'web port', detail: `3080: ${web.error}` },
   );
 
   // mobile home writable

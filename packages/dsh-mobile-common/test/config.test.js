@@ -25,7 +25,6 @@ test('defaultConfig returns the full version-1 shape', () => {
   const d = defaultConfig();
   assert.equal(d.version, 1);
   assert.equal(d.mode, 'tailscale');
-  assert.equal(d.webPort, 3080);
   assert.equal(d.gatewayPort, 3081);
   assert.deepEqual(d.tailscale, { interfaceIp: '' });
   assert.deepEqual(d.relay, { url: '', instanceId: '', instanceToken: '', displayName: '' });
@@ -33,10 +32,12 @@ test('defaultConfig returns the full version-1 shape', () => {
 });
 
 test('normalizeConfig fills defaults and drops unknown structure', () => {
-  const out = normalizeConfig({ mode: 'relay', relay: { url: 'relay.example.com' } });
+  const out = normalizeConfig({ mode: 'relay', relay: { url: 'relay.example.com' }, webPort: 3090 });
   assert.equal(out.mode, 'relay');
   assert.equal(out.relay.url, 'relay.example.com');
-  assert.equal(out.webPort, 3080);
+  // webPort is deliberately NOT part of the schema anymore — the resident
+  // instance always owns 3080; legacy configs carrying webPort drop it.
+  assert.equal(out.webPort, undefined);
   assert.equal(out.relay.instanceToken, '');
 });
 
@@ -47,10 +48,9 @@ test('validateConfig accepts a valid config', () => {
 });
 
 test('validateConfig rejects bad mode and out-of-range ports', () => {
-  const { valid, errors } = validateConfig({ ...defaultConfig(), mode: 'bogus', webPort: 0, gatewayPort: 70000 });
+  const { valid, errors } = validateConfig({ ...defaultConfig(), mode: 'bogus', gatewayPort: 70000 });
   assert.equal(valid, false);
   assert.ok(errors.some((e) => e.includes('mode')));
-  assert.ok(errors.some((e) => e.includes('webPort')));
   assert.ok(errors.some((e) => e.includes('gatewayPort')));
 });
 
@@ -111,8 +111,8 @@ test('setConfigValue deep-sets without mutating the input', () => {
 
 test('setConfigValue validates value and unknown keys', () => {
   const config = defaultConfig();
-  assert.throws(() => setConfigValue(config, 'webPort', 0), ConfigError);
-  assert.throws(() => setConfigValue(config, 'webPort', 'x'), ConfigError);
+  // webPort is intentionally not a valid key anymore (one-instance principle).
+  assert.throws(() => setConfigValue(config, 'webPort', 3080), ConfigError);
   assert.throws(() => setConfigValue(config, 'mode', 'nope'), ConfigError);
   assert.throws(() => setConfigValue(config, 'no.such.key', 1), ConfigError);
 });
