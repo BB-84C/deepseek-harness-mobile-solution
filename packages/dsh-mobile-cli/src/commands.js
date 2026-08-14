@@ -128,27 +128,37 @@ async function cmdStatus() {
   return 0;
 }
 
-async function cmdService(args) {
+async function cmdService(args, options) {
   const [action, nRaw] = args;
   const n = nRaw === undefined ? 50 : Number.parseInt(nRaw, 10);
   const config = mustConfig();
   ensureMobileDirs();
   const logPath = join(logsDir(), "service.log");
 
-  /** One-instance guard: refuse to start when the port is held by a process
-   * that is NOT our tracked instance (i.e. another dsh web). */
+  /** One-instance guard: the port must be free (or held by our own tracked
+   * instance) before starting. With --wait, poll until the occupying process
+   * goes away — long-running tasks can finish on their own schedule. */
   async function startGuarded() {
     const port = config.webPort ?? 3080;
-    const occupied = !(await checkPortFree(port)).free;
-    if (occupied && !service.serviceStatus({ config }).running) {
-      console.error(`port ${port} is occupied by another process — most likely your existing dsh web.`);
-      console.error('This machine must run ONE dsh web (session logs are single-writer).');
-      console.error('Stop that instance, then re-run:');
-      console.error('  dsh --profile mobile service start');
-      console.error('');
-      console.error('Nothing is lost: sessions live on disk under $DSH_HOME/sessions and the');
-      console.error('resident instance lists ALL of them, live-streaming included.');
-      return 1;
+    for (;;) {
+      const occupied = !(await checkPortFree(port)).free;
+      if (!occupied || service.serviceStatus({ config }).running) break;
+      if (!options.wait) {
+        console.error(`port ${port} is occupied by another process — most likely your existing dsh web.`);
+        console.error('This machine must run ONE dsh web (session logs are single-writer), and a running');
+        console.error('instance cannot gain the mobile gateway at runtime (dsh bakes the trust fence at boot).');
+        console.error('');
+        console.error('Options:');
+        console.error('  dsh --profile mobile service start --wait   # start automatically the moment the port frees');
+        console.error('  (close the existing dsh web when its running tasks finish)');
+        console.error('');
+        console.error('Nothing is lost: sessions live on disk under $DSH_HOME/sessions and the');
+        console.error('resident instance lists ALL of them, live-streaming included.');
+        return 1;
+      }
+      console.log(`waiting for port ${port} to free (your existing dsh web still owns it) —`);
+      console.log('the resident instance starts the moment it closes; Ctrl+C cancels.');
+      await new Promise((r) => setTimeout(r, 3000));
     }
     if (!process.env.DEEPSEEK_API_KEY) {
       console.warn("warning: DEEPSEEK_API_KEY is not set in THIS shell. The resident instance inherits this shell's environment, so the phone will report 'no api key configured'. Start the service from a shell where the key is set (machine-level environment variables are inherited automatically).");
