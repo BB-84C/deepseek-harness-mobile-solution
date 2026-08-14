@@ -92,7 +92,7 @@ const SUBCOMMANDS = [
   },
   {
     name: "attach",
-    description: "print how to attach the gateway to your PRIMARY dsh web (one-instance principle: live-stream its sessions, avoid cross-instance resume races)",
+    description: "one-instance mode: make the resident dsh web your primary instance on 3080 (one command, no flags to configure)",
     argsDesc: "",
     options: [],
   },

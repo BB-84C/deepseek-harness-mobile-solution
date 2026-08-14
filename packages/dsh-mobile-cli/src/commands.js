@@ -15,7 +15,7 @@ import * as tailscale from "@bb-84c/dsh-mobile-common/tailscale.js";
 import * as service from "@bb-84c/dsh-mobile-common/service.js";
 import * as devices from "@bb-84c/dsh-mobile-common/devices.js";
 import { buildAccessUrl, pairingUrl } from "@bb-84c/dsh-mobile-common/url.js";
-import { diagnose } from "@bb-84c/dsh-mobile-common/doctor.js";
+import { diagnose, checkPortFree } from "@bb-84c/dsh-mobile-common/doctor.js";
 import { readRelayStatus } from "@bb-84c/dsh-mobile-common/relay-status.js";
 
 /** Repository root, derived from this file's real location (works through the
@@ -408,27 +408,42 @@ async function cmdDoctor() {
 }
 
 async function cmdAttach() {
-  const config = mustConfig();
-  const host = tailscale.tailscaleHostname();
-  const ip = tailscale.tailscaleIp4();
-  const port = config.gatewayPort ?? 3081;
-  console.log("ONE-INSTANCE PRINCIPLE — attach the gateway to your PRIMARY dsh web instance.");
-  console.log("The phone then live-streams the sessions that instance owns; a second instance");
-  console.log("creates cross-instance resume races that corrupt live session logs.");
-  console.log("");
-  console.log("1. stop the separate resident service (if running):");
-  console.log("   dsh --profile mobile service stop");
-  console.log("");
-  console.log("2. launch your primary dsh web (your normal launch command) with these additions:");
-  console.log(`   environment: DSH_MOBILE_INSTANCE=1  DSH_MOBILE_GATEWAY_PORT=${port}`);
-  console.log(`   flags: --trusted-host ${host} --trusted-host ${ip}`);
-  console.log(`          --trusted-host ${host}:${port} --trusted-host ${ip}:${port}`);
-  console.log("");
-  console.log("   (the web profile already carries the gateway plugin — the env activates it in-process)");
-  console.log("");
-  console.log("3. phone URL (unchanged):");
-  console.log(`   ${await mobileUrl(config)}`);
-  console.log("4. every session of that instance — including live ones — is immediately on the phone.");
+  // One-instance mode: the resident instance becomes THE primary dsh web
+  // (port 3080). All flags/env are handled by the launcher — nothing to
+  // configure by hand.
+  const portCheck = await checkPortFree(3080);
+  if (!portCheck.free) {
+    console.error('port 3080 is in use by your other dsh web. Stop that instance first, then re-run:');
+    console.error('  dsh --profile mobile attach');
+    console.error('');
+    console.error('Nothing is lost: sessions live on disk under $DSH_HOME/sessions and the');
+    console.error('resident instance lists ALL of them (live-streaming included).');
+    return 1;
+  }
+
+  let config = mustConfig();
+  if (config.webPort !== 3080) {
+    config = setConfigValue(config, 'webPort', 3080);
+    saveConfig(config);
+    console.log('webPort set to 3080 (one-instance mode)');
+  }
+  const { config: fresh } = loadConfig();
+
+  // stop any resident instance running on another port, then start on 3080
+  const stopped = service.stopService({ config: fresh });
+  if (stopped.error) {
+    console.error(`refusing to restart: ${stopped.error}`);
+    return 1;
+  }
+  ensureMobileDirs();
+  const authorities = await computeAuthorities(fresh);
+  const started = service.startService({ config: fresh, authorities, logPath: join(logsDir(), 'service.log') });
+  if (!started.started) fail(started.error ?? 'failed to start');
+
+  console.log('one-instance mode active — this machine now has ONE dsh web:');
+  console.log('  local : http://127.0.0.1:3080/');
+  console.log(`  remote: ${await mobileUrl(fresh)}`);
+  console.log('pair once on the phone; every session (past and live) is right there.');
   return 0;
 }
 

@@ -52,17 +52,22 @@ like `corrupt session log: seq gap in committed region`. The fix is the
 one-instance principle: **the phone must reach the instance that owns the
 sessions.**
 
-If you already run a primary dsh web (your daily driver), attach the gateway
-to IT instead of running a second instance:
+If you already run a primary dsh web (your daily driver), make the resident
+instance BE it — one command, nothing to configure:
 
 ```sh
-dsh --profile mobile attach        # prints the exact env/flags for your launch
+# stop your old dsh web (it occupies 3080), then:
+dsh --profile mobile attach
 ```
 
-That is: stop the separate resident service, then launch your primary dsh web
-with `DSH_MOBILE_INSTANCE=1` (activates the in-profile gateway) and the
-printed `--trusted-host` flags. The phone then live-streams every session of
-that instance — including ones that are running right now.
+`attach` sets `webPort` to 3080, starts the resident instance there, and
+prints the local + remote URLs. Everything — past sessions, live sessions,
+streaming, the gateway — is now in the one instance that owns the session
+logs. Your local workflow does not change (same `http://127.0.0.1:3080/`);
+the phone URL is unchanged.
+
+If 3080 is still occupied, `attach` refuses with a clear message and nothing
+else is touched; stop the old instance and re-run.
 
 The resident-service model (`service start`) remains the right choice when the
 machine has NO other dsh web: the resident instance is then the single owner
