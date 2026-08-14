@@ -251,18 +251,55 @@ export function createGateway(deps = {}) {
 
   // --- session store -------------------------------------------------------
 
+  // Sessions survive service restarts: sid -> {deviceId, expiresAt} persisted
+  // to $DSH_HOME/mobile/data/sessions.json with the sid stored ONLY as its
+  // SHA-256 hash (the raw sid lives in the browser cookie alone).
+  const sessionsFilePath = path.join(paths().dataDir, 'sessions.json');
+  let sessionDirty = false;
+
+  function persistSessions() {
+    if (!sessionDirty) return;
+    sessionDirty = false;
+    try {
+      const records = [];
+      for (const [hash, session] of sessions) {
+        records.push({ hash, deviceId: session.deviceId, expiresAt: session.expiresAt });
+      }
+      atomicWriteJson(sessionsFilePath, records);
+    } catch {
+      // persistence must never break serving
+    }
+  }
+
+  function loadSessions() {
+    try {
+      const records = JSON.parse(fs.readFileSync(sessionsFilePath, 'utf8'));
+      const t = now();
+      for (const record of Array.isArray(records) ? records : []) {
+        if (typeof record?.hash !== 'string' || typeof record?.deviceId !== 'string') continue;
+        if (typeof record.expiresAt !== 'number' || record.expiresAt <= t) continue;
+        sessions.set(record.hash, { deviceId: record.deviceId, expiresAt: record.expiresAt });
+      }
+    } catch {
+      // missing/corrupt file -> start empty
+    }
+  }
+
   function createSession(deviceId) {
     const sid = randomBytes(16).toString('hex');
-    sessions.set(sid, { deviceId, expiresAt: now() + sessionTtlMs });
+    sessions.set(sha256Hex(sid), { deviceId, expiresAt: now() + sessionTtlMs });
+    sessionDirty = true;
+    persistSessions();
     return { sid, maxAgeSec: sessionMaxAgeSec };
   }
 
   function getSession(sid) {
     if (!sid) return null;
-    const session = sessions.get(sid);
+    const session = sessions.get(sha256Hex(sid));
     if (!session) return null;
     if (session.expiresAt <= now()) {
-      sessions.delete(sid);
+      sessions.delete(sha256Hex(sid));
+      sessionDirty = true;
       return null;
     }
     session.expiresAt = now() + sessionTtlMs; // sliding renewal
@@ -270,19 +307,25 @@ export function createGateway(deps = {}) {
   }
 
   function destroyDeviceSessions(deviceId) {
-    for (const [sid, session] of sessions) {
-      if (session.deviceId === deviceId) sessions.delete(sid);
+    for (const [hash, session] of sessions) {
+      if (session.deviceId === deviceId) sessions.delete(hash);
     }
+    sessionDirty = true;
+    persistSessions();
   }
 
   function cleanup() {
     const t = now();
-    for (const [sid, session] of sessions) {
-      if (session.expiresAt <= t) sessions.delete(sid);
+    for (const [hash, session] of sessions) {
+      if (session.expiresAt <= t) {
+        sessions.delete(hash);
+        sessionDirty = true;
+      }
     }
     for (const [ip, bucket] of buckets) {
       if (t - bucket.last > RATE_WINDOW_MS * 2) buckets.delete(ip);
     }
+    persistSessions();
   }
 
   // --- rate limiting (in-memory token bucket) ------------------------------
@@ -844,6 +887,8 @@ export function createGateway(deps = {}) {
     return new Promise((resolve, reject) => {
       if (started && server) return resolve({ port: boundPort, host: boundHost });
       ensureMobileDirs(env);
+      fs.mkdirSync(path.dirname(sessionsFilePath), { recursive: true });
+      loadSessions();
       writeSidecar();
       const factory = serverFactory || ((handler) => http.createServer(handler));
       server = factory(handleRequest);

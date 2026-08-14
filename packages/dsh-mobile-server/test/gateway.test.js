@@ -23,10 +23,10 @@ let deviceToken;
 
 const FAKE_TS = { ip4: () => '100.101.132.89', hostname: () => 'woody.tail40672a.ts.net' };
 
-function request(pathname, { method = 'GET', headers = {}, body } = {}) {
+function request(pathname, { method = 'GET', headers = {}, body } = {}, port = gatewayPort) {
   return new Promise((resolve, reject) => {
     const req = http.request(
-      { hostname: '127.0.0.1', port: gatewayPort, path: pathname, method, headers },
+      { hostname: '127.0.0.1', port, path: pathname, method, headers },
       (res) => {
         const chunks = [];
         res.on('data', (c) => chunks.push(c));
@@ -354,6 +354,49 @@ test('sidecar is written on start and removed on stop', async () => {
   assert.strictEqual(sidecar.pid, 424242);
   assert.strictEqual(sidecar.token, 'ab'.repeat(16));
   assert.strictEqual(typeof sidecar.startedAt, 'number');
+});
+
+test('sessions survive a gateway restart (persisted store, hashed sids)', async () => {
+  // pair through the main gateway (browser flow sets the cookie)
+  const pending = store.issuePairing({ name: 'persist-phone' });
+  const pairRes = await request(`/mobile/pair?code=${pending.pairingCode}`);
+  assert.strictEqual(pairRes.status, 302);
+  const sidCookie = cookie(pairRes.headers);
+  assert.ok(sidCookie.startsWith('dsh_mobile_sid='));
+
+  // the persisted store keeps only hashes, never the raw sid
+  const records = JSON.parse(await fs.readFile(path.join(tmpHome, 'data', 'sessions.json'), 'utf8'));
+  assert.ok(records.length >= 1);
+  for (const record of records) {
+    assert.match(record.hash, /^[0-9a-f]{64}$/);
+  }
+  const rawSid = sidCookie.split('=')[1];
+  assert.ok(!JSON.stringify(records).includes(rawSid), 'raw sid must not be persisted');
+
+  // a FRESH gateway instance (same home) accepts the old cookie
+  const gw2 = createGateway({
+    env: testEnv,
+    pid: 424243,
+    config: {
+      mode: 'tailscale',
+      webPort: targetPort,
+      gatewayPort: 3082,
+      relay: {},
+      tailscale: {},
+      auth: { sessionTtlDays: 30 },
+    },
+    devices: store,
+    tailscale: FAKE_TS,
+    relayStatus: () => null,
+  });
+  const started2 = await gw2.start();
+  try {
+    const proxied = await request('/api/hello?persisted=1', { headers: { cookie: sidCookie } }, started2.port);
+    assert.strictEqual(proxied.status, 200);
+    assert.strictEqual(proxied.json().url, '/api/hello?persisted=1');
+  } finally {
+    await gw2.stop();
+  }
 });
 
 // Rate limiting is tested last: its 12 failed attempts exhaust the per-IP
