@@ -28,8 +28,12 @@ const CORS_HEADERS = {
 const HOP_BY_HOP = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
   'te', 'trailer', 'transfer-encoding', 'upgrade', 'host', 'content-length',
-  'authorization', 'x-relay-instance', 'x-relay-latency-ms',
+  'x-relay-instance', 'x-relay-latency-ms',
 ])
+// Note: `authorization` is intentionally NOT stripped — the instance-side
+// gateway is the device-auth boundary for both transports, so the client's
+// device credential travels verbatim through the relay (see protocol §6).
+// Request-side x-relay-* headers are stripped to prevent spoofing.
 
 // --- Small helpers ----------------------------------------------------------
 
@@ -258,8 +262,19 @@ export function createRelayServer(options = {}) {
   }
 
   function abortPending(p, status, errorObj) {
-    if (p.started) p.res.destroy()
-    else sendJson(p.res, status, errorObj)
+    if (p.started) {
+      p.res.destroy()
+    } else {
+      try {
+        sendJson(p.res, status, errorObj)
+      } catch {
+        try {
+          p.res.destroy()
+        } catch {
+          /* ignore */
+        }
+      }
+    }
   }
 
   function failPending(instanceId) {
@@ -532,8 +547,9 @@ export function createRelayServer(options = {}) {
     }
 
     if (pathname.startsWith('/relay/instance/')) {
-      const auth = authenticateClientOrOwner(req)
-      if (!auth) return sendJson(res, 401, { error: 'unauthorized' })
+      // Transport-only path: the relay does NOT authenticate here. The
+      // instance-side gateway authenticates the client (Authorization passes
+      // through verbatim). Relay client tokens guard the directory only.
       const after = pathname.slice('/relay/instance/'.length)
       const slash = after.indexOf('/')
       let id
@@ -546,7 +562,7 @@ export function createRelayServer(options = {}) {
         restPath = after.slice(slash)
       }
       id = decodeURIComponent(id)
-      return handleForward(req, res, id, restPath + u.search, auth)
+      return handleForward(req, res, id, restPath + u.search, null)
     }
 
     return sendJson(res, 404, { error: 'not-found' })

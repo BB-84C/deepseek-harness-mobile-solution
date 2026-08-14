@@ -34,8 +34,17 @@ dashboard does this for you) to create the owner session cookie.
 
 ## Environment
 
-Configuration is via CLI flags (above). Secrets are stored only as SHA-256
-hashes in `<data-dir>/tokens.json`.
+Configuration is via CLI flags (above) or environment variables; a CLI flag
+wins over its env var, which wins over the default.
+
+| Flag | Env var | Default |
+| --- | --- | --- |
+| `--port` | `DSH_RELAY_PORT` | `4097` |
+| `--host` | `DSH_RELAY_HOST` | `127.0.0.1` |
+| `--data-dir` | `DSH_RELAY_DATA_DIR` | `./data` |
+| `--bootstrap-token` | `DSH_RELAY_BOOTSTRAP_TOKEN` | *(generated)* |
+
+Secrets are stored only as SHA-256 hashes in `<data-dir>/tokens.json`.
 
 ## API surface (summary)
 

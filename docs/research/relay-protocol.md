@@ -42,7 +42,7 @@
 | `/relay/` | GET | 无 | owner 仪表盘（纯 HTML/JS） |
 | `/relay/instance-tunnel` | Upgrade (WS) | instance token（query） | 实例出站隧道 |
 | `/relay/api/targets` | GET | client token \| owner cookie | `[{id,name,online,lastSeenMs}]` |
-| `/relay/instance/<id>/<path...>` | 任意 | client token \| owner cookie | 经隧道转发 |
+| `/relay/instance/<id>/<path...>` | 任意 | 无（实例 gateway 自行认证） | 经隧道转发 |
 | `/relay/api/setup` | POST | bootstrap token | 一次性建立 owner 会话 |
 | `/relay/api/tokens` | GET/POST | owner cookie | 列出 / 创建凭据 |
 | `/relay/api/tokens/<hashPrefix>` | DELETE | owner cookie | 撤销凭据并踢活连接 |
@@ -59,7 +59,10 @@ Authorization: Bearer <client-token>
 
 - client token 为 32 字节随机数的 64 位 hex 小写。
 - relay 校验 `sha256(token)` 是否命中且未撤销。
-- 客户端可见的目录与转发接口：`/relay/api/targets`、`/relay/instance/<id>/...`。
+- client token 保护**目录**（`/relay/api/targets`）；owner 接口另需 owner 会话。
+- **转发路径不做 relay 认证**：`/relay/instance/<id>/...` 的凭据（`Authorization`
+  bearer 或实例 gateway 的会话 cookie）原样转发，由实例侧 gateway 校验——gateway
+  是 tailscale / relay 两种传输模式共同的设备认证边界，relay 只是传输。
 
 ### 3.2 owner（HttpOnly 会话 cookie）
 
@@ -158,10 +161,10 @@ Upgrade: websocket
 请求头转发前剥离（hop-by-hop 及 relay 私有头）：
 
 - `connection`、`keep-alive`、`proxy-*`、`te`、`trailer`、`transfer-encoding`、
-  `upgrade`、`host`、`content-length`、`authorization`、`x-relay-*`。
-- `cookie` 中的 `dsh_relay_owner=...` 会被剔除，其余 cookie 原样转发（供实例侧
-  gateway 自身设备认证使用）。
-- `Authorization: Bearer <client-token>` **绝不转发**（这是 relay↔客户端的凭据）。
+  `upgrade`、`host`、`content-length`、请求侧 `x-relay-*`（防伪造 relay 追加的响应头）。
+- `authorization` **原样转发**：携带的是实例设备凭据，由实例侧 gateway 校验。
+- `cookie` 中的 `dsh_relay_owner=...` 会被剔除，其余 cookie（含实例 gateway 的
+  会话 cookie `dsh_mobile_sid`）原样转发。
 
 ## 7. 限速
 

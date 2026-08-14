@@ -43,11 +43,13 @@ async function tmpDataDir() {
 }
 
 // Minimal HTTP client (node:http) so we can set arbitrary headers (cookies).
+// `agent: false` opts out of keep-alive pooling (Connection: close), so no idle
+// socket is left behind to keep the test process's event loop alive.
 function request(baseUrl, pathname, { method = 'GET', headers = {}, body } = {}) {
   return new Promise((resolve, reject) => {
     const u = new URL(baseUrl)
     const req = http.request(
-      { hostname: u.hostname, port: Number(u.port), path: pathname, method, headers },
+      { hostname: u.hostname, port: Number(u.port), path: pathname, method, headers, agent: false },
       (res) => {
         const chunks = []
         res.on('data', (c) => chunks.push(c))
@@ -389,7 +391,9 @@ describe('relay integration', () => {
 
   test('auth failures (401/403)', async () => {
     assert.strictEqual((await request(base, '/relay/api/targets')).status, 401)
-    assert.strictEqual((await request(base, '/relay/instance/x/y')).status, 401)
+    // The proxy path is transport-only (the instance gateway authenticates):
+    // an unknown instance answers 404 even without any relay credential.
+    assert.strictEqual((await request(base, '/relay/instance/x/y')).status, 404)
     assert.strictEqual((await request(base, '/relay/api/tokens')).status, 401)
     assert.strictEqual(
       (await request(base, '/relay/api/tokens', {
@@ -403,6 +407,23 @@ describe('relay integration', () => {
       })).status,
       401,
     )
+  })
+
+  test('authorization header passes verbatim to the instance', async () => {
+    const inst = await createFakeInstance({
+      url: wsBase, token: instanceToken, id: instanceId, name: 'my-instance',
+      handler: async ({ headers }) => ({ status: 200, body: JSON.stringify({ got: headers.authorization ?? null }) }),
+    })
+    try {
+      await waitFor(() => relay.registry.get(instanceId) !== null)
+      const res = await request(base, '/relay/instance/' + instanceId + '/api/hello', {
+        headers: { authorization: 'Bearer device-token-123' },
+      })
+      assert.strictEqual(res.status, 200)
+      assert.strictEqual(res.json().got, 'Bearer device-token-123')
+    } finally {
+      inst.close()
+    }
   })
 
   test('unknown instance -> 404', async () => {
@@ -426,35 +447,34 @@ describe('relay integration', () => {
     assert.strictEqual(res.json().error, 'instance-offline')
   })
 
-  test('revocation drops live client request', async () => {
+  test('instance token revocation drops the tunnel and in-flight requests', async () => {
     const createRes = await request(base, '/relay/api/tokens', {
       method: 'POST',
       headers: { 'content-type': 'application/json', cookie: ownerCookie },
-      body: JSON.stringify({ label: 'revokeme', kind: 'client' }),
+      body: JSON.stringify({ label: 'revokeme-instance', kind: 'instance' }),
     })
-    const { token: victimToken, hashPrefix: victimPrefix } = createRes.json()
+    const { token: victimInstanceToken, hashPrefix: victimPrefix } = createRes.json()
 
     let release
     const gate = new Promise((r) => { release = r })
     let invokedResolve
     const invoked = new Promise((r) => { invokedResolve = r })
+    const revokeId = 'revoke-' + Date.now()
     const inst = await createFakeInstance({
       url: wsBase,
-      token: instanceToken,
-      id: instanceId,
-      name: 'my-instance',
+      token: victimInstanceToken,
+      id: revokeId,
+      name: 'revoke-me',
       handler: async () => {
         invokedResolve()
         await gate
         return { status: 200, body: 'late' }
       },
     })
-    await waitFor(() => relay.registry.get(instanceId) !== null)
+    await waitFor(() => relay.registry.get(revokeId) !== null)
 
-    const pendingReq = request(base, '/relay/instance/' + instanceId + '/slow', {
-      headers: { authorization: 'Bearer ' + victimToken },
-    })
-    await invoked // the request reached the instance, so it is tracked
+    const pendingReq = request(base, '/relay/instance/' + revokeId + '/slow')
+    await invoked // the request reached the instance
 
     const del = await request(base, '/relay/api/tokens/' + victimPrefix, {
       method: 'DELETE',
@@ -463,8 +483,8 @@ describe('relay integration', () => {
     assert.strictEqual(del.status, 200)
 
     const res = await pendingReq
-    assert.strictEqual(res.status, 503)
-    assert.strictEqual(res.json().error, 'token-revoked')
+    assert.strictEqual(res.status, 502)
+    assert.strictEqual(res.json().error, 'instance-offline')
 
     release()
     inst.close()

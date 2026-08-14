@@ -88,7 +88,7 @@ export class Registry {
     const inst = this.instances.get(id)
     if (!inst) return { error: 'instance-offline' }
     if (inst.streams.size >= this.maxStreams) return { error: 'stream-limit' }
-    const timer = setTimeout(() => {
+    let timer = setTimeout(() => {
       inst.streams.delete(streamId)
       if (typeof onIdle === 'function') onIdle()
     }, this.idleTimeoutMs)

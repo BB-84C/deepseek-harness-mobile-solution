@@ -33,9 +33,9 @@ function parseArgs(argv) {
 async function main() {
   const args = parseArgs(process.argv.slice(2))
 
-  const host = args['--host'] ?? '127.0.0.1'
-  const port = Number(args['--port'] ?? 4097)
-  const dataDir = path.resolve(args['--data-dir'] ?? './data')
+  const host = args['--host'] ?? process.env.DSH_RELAY_HOST ?? '127.0.0.1'
+  const port = Number(args['--port'] ?? process.env.DSH_RELAY_PORT ?? 4097)
+  const dataDir = path.resolve(args['--data-dir'] ?? process.env.DSH_RELAY_DATA_DIR ?? './data')
 
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     console.error('--port must be an integer between 0 and 65535')
@@ -43,8 +43,9 @@ async function main() {
   }
 
   let bootstrapRaw = null
-  if (args['--bootstrap-token']) {
-    bootstrapRaw = String(args['--bootstrap-token'])
+  const bootstrapArg = args['--bootstrap-token'] ?? process.env.DSH_RELAY_BOOTSTRAP_TOKEN ?? null
+  if (bootstrapArg) {
+    bootstrapRaw = String(bootstrapArg)
     if (!/^[0-9a-f]{64}$/i.test(bootstrapRaw)) {
       console.error('--bootstrap-token must be 64 hex characters (32 bytes)')
       process.exit(2)
@@ -62,7 +63,7 @@ async function main() {
   console.log(`dsh-relay listening on http://${host}:${relay.port} (data dir: ${dataDir})`)
   if (issued) {
     console.log('')
-    console.log('owner bootstrap token (one-time, shown only now — keep it safe):')
+    console.log('owner bootstrap token (one-time, shown only now - keep it safe):')
     console.log(issued)
     console.log('')
     console.log('Open the dashboard and POST /relay/api/setup with this token to create')
