@@ -861,6 +861,18 @@ export function createRelayServer(options = {}) {
         })
       })
       relay.port = httpServer.address().port
+      // Keepalive: Cloudflare (and other proxies) drop idle WebSockets after
+      // ~100s. Ping every online tunnel well below that; instances auto-pong.
+      relay._keepalive = setInterval(() => {
+        for (const socket of registry.onlineSockets()) {
+          try {
+            socket?.ping?.()
+          } catch {
+            /* a dead socket closes itself via its own error path */
+          }
+        }
+      }, 30000)
+      if (relay._keepalive.unref) relay._keepalive.unref()
       return relay
     },
 
@@ -878,6 +890,10 @@ export function createRelayServer(options = {}) {
     },
 
     async close() {
+      if (relay._keepalive) {
+        clearInterval(relay._keepalive)
+        relay._keepalive = null
+      }
       registry.closeAll()
       for (const p of [...pendingMap.values()]) {
         abortPending(p, 503, { error: 'relay-closing' })

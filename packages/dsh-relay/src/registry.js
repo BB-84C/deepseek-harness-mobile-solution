@@ -81,6 +81,11 @@ export class Registry {
     }))
   }
 
+  // Live instance sockets (for keepalive pings).
+  onlineSockets() {
+    return [...this.instances.values()].map((inst) => inst.socket)
+  }
+
   // Open an inflight stream on an instance. Returns { stream } on success or
   // { error } when the instance is offline or the 32-stream cap is hit.
   // `onIdle` fires once if the stream stays idle for the idle timeout.
