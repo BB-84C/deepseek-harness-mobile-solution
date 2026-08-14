@@ -774,6 +774,17 @@ export function createGateway(deps = {}) {
 
   function forward(req, res, deviceId, preReadBody = null) {
     const headers = filterHeaders(req.headers, HOP_BY_HOP);
+    // Relay mode: the tunnel's fetch forbids a custom Host header, so the web
+    // app would see Host: 127.0.0.1:<gatewayPort> while the browser's requests
+    // carry Origin: https://<relay-host> — the official trust fence then
+    // rejects every /api call with 403 (Origin vs Host mismatch) and pins
+    // privileged methods to loopback anyway. Present ALL proxied requests as
+    // loopback-local and drop the browser origin: the gateway is the device
+    // authentication boundary here, not the web app's browser fence.
+    if (effectiveConfig.mode === 'relay') {
+      headers.host = `127.0.0.1:${target}`;
+      delete headers.origin;
+    }
     const proxyReq = http.request(
       {
         host: '127.0.0.1',
@@ -878,7 +889,12 @@ export function createGateway(deps = {}) {
     }
     const upstream = net.connect(target, '127.0.0.1', () => {
       const lines = [`${req.method} ${req.url} HTTP/1.1`];
-      for (const [key, value] of Object.entries(req.headers || {})) {
+      const headers = { ...(req.headers || {}) };
+      if (effectiveConfig.mode === 'relay') {
+        headers.host = `127.0.0.1:${target}`;
+        delete headers.origin;
+      }
+      for (const [key, value] of Object.entries(headers)) {
         if (UPGRADE_STRIP.has(key.toLowerCase())) continue;
         lines.push(`${key}: ${Array.isArray(value) ? value.join(', ') : value}`);
       }

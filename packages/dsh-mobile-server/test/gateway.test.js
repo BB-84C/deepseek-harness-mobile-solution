@@ -82,7 +82,7 @@ before(async () => {
     req.on('data', (c) => chunks.push(c));
     req.on('end', () => {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ method: req.method, url: req.url, auth: req.headers.authorization ?? null, body: Buffer.concat(chunks).toString() }));
+      res.end(JSON.stringify({ method: req.method, url: req.url, auth: req.headers.authorization ?? null, host: req.headers.host ?? null, origin: req.headers.origin ?? null, body: Buffer.concat(chunks).toString() }));
     });
   });
   targetServer.on('upgrade', (req, socket, head) => {
@@ -476,6 +476,53 @@ test('session-live guard blocks prompts to sessions another instance is writing'
   } finally {
     await gw3.stop();
     await fs.rm(guardHome, { recursive: true, force: true });
+  }
+});
+
+test('relay mode presents proxied requests as loopback (host rewritten, origin stripped)', async () => {
+  const gwR = createGateway({
+    env: testEnv,
+    pid: 424246,
+    targetPort,
+    config: {
+      mode: 'relay',
+      gatewayPort: 3084,
+      relay: { url: 'https://dsh.bb84.ai' },
+      tailscale: {},
+      auth: { sessionTtlDays: 30 },
+    },
+    devices: store,
+    tailscale: FAKE_TS,
+    relayStatus: () => null,
+  });
+  const startedR = await gwR.start();
+  try {
+    const pending = store.issuePairing({ name: 'relay-phone' });
+    const pairRes = await request('/mobile/pair', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ code: pending.pairingCode }),
+    }, startedR.port);
+    const token = pairRes.json().token;
+
+    // browser-like request: Origin present, like the phone over the relay
+    const proxied = await request('/api/host.describe', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        origin: 'https://dsh.bb84.ai',
+        'content-type': 'application/json',
+      },
+      body: '{}',
+    }, startedR.port);
+    assert.strictEqual(proxied.status, 200);
+    const body = proxied.json();
+    // the official trust fence compares Origin against Host; the gateway must
+    // present the request as loopback-local and drop the browser origin
+    assert.strictEqual(body.host, `127.0.0.1:${targetPort}`);
+    assert.strictEqual(body.origin, null);
+  } finally {
+    await gwR.stop();
   }
 });
 
