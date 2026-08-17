@@ -24,6 +24,30 @@ This project adds a remote control plane and two transports:
 
 Both serve the same thing: the official dsh web UI through an authenticating gateway.
 
+## Install
+
+This is a **dsh plugin** — installed with the stock plugin manager, controlled through one entry point:
+
+```sh
+# one command (recommended)
+dsh --profile mobile install
+```
+
+```sh
+# or add the two plugins directly
+dsh plugin --profile mobile add @bb-84c/dsh-mobile-cli
+dsh plugin --profile web    add @bb-84c/dsh-mobile-server
+```
+
+Everything lives behind **`dsh --profile mobile`** — `service`, `tailscale`, `relay`, `device`, `config`, `status`, `doctor`, `logs`, `update`, `uninstall`.
+
+| Package | Profile | Role |
+| --- | --- | --- |
+| `@bb-84c/dsh-mobile-cli` | `mobile` | command family |
+| `@bb-84c/dsh-mobile-server` | `web` | gateway + transports + session hydration |
+
+📖 [`docs/plugin-install.md`](docs/plugin-install.md)
+
 ## Features
 
 - One entry point: `dsh --profile mobile <command>`
@@ -73,19 +97,6 @@ dsh --profile mobile device pair --name iPhone
 Open `https://relay.example.com`, pick a machine, pair, done.
 
 📖 [`docs/deployment/relay.md`](docs/deployment/relay.md)
-
-## Install
-
-```sh
-dsh --profile mobile install
-```
-
-| Package | Profile | Role |
-| --- | --- | --- |
-| `@bb-84c/dsh-mobile-cli` | `mobile` | command family |
-| `@bb-84c/dsh-mobile-server` | `web` | gateway + transports + session hydration |
-
-📖 [`docs/plugin-install.md`](docs/plugin-install.md)
 
 ## For dsh agents
 
