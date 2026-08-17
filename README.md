@@ -2,27 +2,25 @@
 
 <img src="assets/banner.svg" alt="dsh mobile" width="100%">
 
-# dsh mobile
+# `dsh` Mobile
 
-### Control your local [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) from any device — the official web UI, unchanged.
+### Control your local [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) from any remote device
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node ≥22](https://img.shields.io/badge/Node-%E2%89%A522-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![dsh plugin](https://img.shields.io/badge/DeepSeek_Harness-Plugin-4D6BFE)](https://github.com/topics/dsh-plugin)
-[![tests](https://github.com/BB-84C/deepseek-harness-mobile-solution/actions/workflows/ci.yml/badge.svg)](https://github.com/BB-84C/deepseek-harness-mobile-solution/actions/workflows/ci.yml)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-[![GitHub stars](https://img.shields.io/github/stars/BB-84C/deepseek-harness-mobile-solution?style=social)](https://github.com/BB-84C/deepseek-harness-mobile-solution/stargazers)
+<!-- [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![GitHub stars](https://img.shields.io/github/stars/BB-84C/deepseek-harness-mobile-solution?style=social)](https://github.com/BB-84C/deepseek-harness-mobile-solution/stargazers) -->
 
-<sub>Community project, not affiliated with DeepSeek.</sub>
 
 </div>
 
 ---
 
-dsh keeps running on your machine. This project adds a remote control plane and two transports:
+This project adds a remote control plane and two transports:
 
 - **Tailscale** — point-to-point over your tailnet.
-- **VPS relay** — one relay, many machines, one menu.
+- **VPS relay** — If you happen to have your own VPS, use your VPS as relay. One relay, many machines, one menu.
 
 Both serve the same thing: the official dsh web UI through an authenticating gateway.
 
