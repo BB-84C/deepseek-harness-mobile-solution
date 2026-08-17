@@ -1,9 +1,27 @@
 # Mobile App 规范（原生 Android/iOS）
 
 > 本文档是 **Android/iOS 原生 app** 的实现契约，交给实现 agent（本仓库只出 spec）。
-> 状态：M6 定稿。内部文档（中文）。
+> 状态：M6 **推迟**（2026-08 决定）。内部文档（中文）。
 > 依赖契约：`docs/design/gateway.md`（网关端点/认证/配对）、`docs/research/relay-protocol.md`（relay 目录/转发）、`docs/research/opencode-mobile-architecture.md`（定位与重连模型，**逻辑借鉴、UI 禁止**）。
 > 铁律：app 的 UI/UX **跟随官方 dsh Web**，绝不抄 opencode-mobile UI。
+
+## 0. 实施策略（2026-08 决定：推迟 + 复兴时 WebView 优先）
+
+**决定**：dsh 官方仍处于快速更新期，原生 app 暂不启动。理由：官方 Web UI 自身已适配移动端，
+浏览器直开即用，且随官方更新免费获得新功能；任何**重实现官方 UI 的原生界面**都会把 app 绑死到
+官方的 API/行为细节上，官方每次改动都要适配，维护成本不成比例。
+
+**复兴时的推荐形态（优先级从高到低）**：
+
+1. **WebView 包装（首选）**：WKWebView / Android WebView 直接加载官方 UI（经 gateway 的
+   `https://<relay>/instance/<id>/` 或 tailscale origin），注入配对后的会话 cookie 或 Bearer。
+   app 原生层只负责：QR 配对、token 安全存储、深链、通知（phase 2）。UI 面零重实现 →
+   官方更新零适配，仅需跑 `docs/research/upstream-touchpoints.md` 的冒烟清单。
+2. 原生重实现 UI（本文档 §2-§8 描述的完整方案）：仅在 WebView 方案被明确否决（如性能/体验
+   要求）时才考虑，且必须接受「跟随官方 UI 变化持续适配」的维护义务。
+
+本文档其余章节 = 方案 2 的完整契约，保留备查；方案 1 只使用 §3 的端点契约
+（`/mobile/pair` mint-at-redemption、Bearer 代理面、relay 目录）。
 
 ## 1. 定位：监督/控制面板，不是开发环境
 

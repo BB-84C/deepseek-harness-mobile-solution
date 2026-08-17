@@ -197,7 +197,7 @@ update                        升级两个插件（转发 dsh plugin update）�
 | M3 | relay + 隧道 | dsh-relay 服务 + 实例隧道客户端 + 目录/多路复用 | ✅ 代码完成，VPS 实测通过 |
 | M4 | 设备配对与安全加固 | 配对码兑换、哈希存储、撤销踢会话、限速、文档化威胁模型 | ✅ 代码完成，实测通过 |
 | M5 | 部署与文档 | tailscale/VPS relay 部署脚本与教程、插件安装说明、三平台自启模板 | 🔄 文档/脚本已写，实测待 M7 |
-| M6 | 移动 UI/UX specs | mobile-web / mobile-app（Android+iOS）specs（交其他 agent） | ⬜ |
+| M6 | 移动 UI/UX specs | mobile-web / mobile-app（Android+iOS）specs（交其他 agent） | ⏸ 推迟（2026-08 决定：官方更新期先骑官方 Web UI，app 复兴时 WebView 包装优先，见 specs/mobile-app.md §0） |
 | M7 | 端到端验收 | 本机 tailscale P2P 实测 + relay 模拟实测；README 完善；发布前检查 | ✅ 本机全链路通过（详见 docs/acceptance.md；第二设备/VPS/多平台项待用户复核） |
 
 当前进度：**全部里程碑代码完成，本机端到端验收通过**（docs/acceptance.md，2026-08-14）：
@@ -219,8 +219,9 @@ tailscale 点对点（gateway 绑 tailnet 可达、配对、官方 SPA 代理、
   socket 对接 gateway，101 握手由浏览器与 dsh web 完成）→ 手机会话的实时流式输出实测通过。
 - **菜单服务端渲染**：实例表直接由 relay 渲染进 HTML（`__ROWS__` 占位），浏览器 JS 只做 5 秒刷新——
   菜单不依赖客户端脚本，任何浏览器（含 JS 被禁/异常）都能看到机器列表；实例目录含在线状态与空态提示。
-剩余事项：移动 app 实现（specs 就绪）、macOS/Linux 上 CLI/常驻服务实测（浏览器访问已测）、
-多实例 fan-in 实测（第二台机器注册 relay）、relay owner passkey 注册（可选）。
+剩余事项：多实例 fan-in 实测（第二台机器注册 relay）、macOS/Linux 上 CLI/常驻服务实测（浏览器访问已测）、
+relay owner passkey 注册（可选）；移动 app 已决定**推迟**（战略：骑官方 Web UI 存活，官方升级适配面
+已最小化并台账化，见 `docs/research/upstream-touchpoints.md`）。
 
 ## 5. 仓库布局
 
