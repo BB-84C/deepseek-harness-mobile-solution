@@ -1,6 +1,8 @@
 // Cross-platform "which" lookup used to resolve bare command names on PATH.
 // Uses `where.exe` on Windows and `which` on POSIX, both via spawnSync so the
-// result is a concrete absolute path (no shell involved).
+// result is a concrete absolute path (no shell involved). `windowsHide` keeps
+// the lookup silent when the caller has no console of its own (the resident
+// instance is detached; see src/no-console-window.cjs).
 import { spawnSync } from 'node:child_process';
 
 /**
@@ -13,12 +15,12 @@ import { spawnSync } from 'node:child_process';
 export function whichCommand(name, platform = process.platform, spawnImpl = spawnSync) {
   try {
     if (platform === 'win32') {
-      const r = spawnImpl('where.exe', [name], { encoding: 'utf8' });
+      const r = spawnImpl('where.exe', [name], { encoding: 'utf8', windowsHide: true });
       if (r && r.status === 0 && typeof r.stdout === 'string' && r.stdout.trim()) {
         return r.stdout.trim().split(/\r?\n/)[0].trim();
       }
     } else {
-      const r = spawnImpl('which', [name], { encoding: 'utf8' });
+      const r = spawnImpl('which', [name], { encoding: 'utf8', windowsHide: true });
       if (r && r.status === 0 && typeof r.stdout === 'string' && r.stdout.trim()) {
         return r.stdout.trim().split(/\r?\n/)[0].trim();
       }

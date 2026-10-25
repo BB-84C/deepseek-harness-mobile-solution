@@ -16,12 +16,22 @@ the **host**; the phone is only a frontend.
 | `relay start\|stop\|restart\|logs [n]` | **Run the resident dsh web through the relay** (sets the transport, guards port 3080, starts the tunnel) |
 | `relay disconnect\|status\|ping` | Leave / inspect / probe the relay connection |
 | `service start\|stop\|restart\|status\|logs [n]` | Low-level lifecycle in the currently configured transport (auto-start templates use this) |
-| `device pair --name <n>\|list\|revoke <id>` | One-time pairing codes, device directory, instant revocation |
+| `device pair --name <n>` | One-time pairing code (URL + code, 5-minute TTL) |
+| `device list` | Device directory; stale records are cleaned up first |
+| `device prune [--days <n>]` | Drop revoked/invalid/duplicate/unseen devices (`--days 0` keeps by age) |
+| `device revoke <id>` | Instant revocation (live sockets closed) |
 | `url` | Print the URL for the phone (https MagicDNS when serve is on) |
 | `config show\|get <key>\|set <key> <value>` | Read/write `$DSH_HOME/mobile/config.json` |
-| `doctor` | Diagnostics: versions, ports, tailscale, relay, LLM credentials |
+| `doctor` | Diagnostics: dsh version, ports, tailscale, relay, LLM credentials |
 | `status` | One-page overview: service, tailscale, relay, devices, URL |
 | `update` | Upgrade the plugin packages in both profiles |
+
+> Device records used to accumulate: every re-pairing under the same name added
+> another active entry, so `status` listed the same phones over and over. The
+> store now prunes on `status`, `device list`, the gateway's start-up, and the
+> devices API: revoked records, records without a usable token hash, older
+> duplicates of the same name, and records unseen for 30 days are removed (the
+> 30-day window is configurable through `device prune --days`).
 
 ## Ports (you never configure these by hand)
 

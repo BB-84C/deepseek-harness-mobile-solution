@@ -171,6 +171,73 @@ export function createDeviceStore(deps = {}) {
     return loadDevices();
   }
 
+  /** Default inactivity horizon for automatic device cleanup (days; 0 disables). */
+  const DEFAULT_PRUNE_DAYS = 30;
+
+  /**
+   * Remove dead device records and collapse re-pairing duplicates.
+   *
+   * The store only ever appended, so a phone that re-paired (new pairing code,
+   * new token) left the previous record behind under the same display name —
+   * `status` then listed the same few devices over and over. Entries are
+   * dropped when they are revoked, carry no usable token hash, duplicate a
+   * newer record with the same name, or have not been seen for `maxAgeDays`.
+   *
+   * @param {{ now?: number, maxAgeDays?: number }} [opts]
+   *   `maxAgeDays` 0 disables the inactivity rule; defaults to 30 days.
+   * @returns {{ removed: Array<{ id: string, name: string, reason: string }>, kept: number }}
+   */
+  function pruneDevices(opts = {}) {
+    const t = opts.now ?? now();
+    const maxAgeDays = typeof opts.maxAgeDays === 'number' ? opts.maxAgeDays : DEFAULT_PRUNE_DAYS;
+    const devices = loadDevices();
+    const removed = [];
+
+    // Newest activity first: the first active record for a name wins, and a
+    // duplicate that is newer than the one it replaces keeps the name.
+    const order = devices
+      .map((device, index) => ({ device, index }))
+      .sort((a, b) => {
+        const seenA = activityOf(a.device);
+        const seenB = activityOf(b.device);
+        if (seenB !== seenA) return seenB - seenA;
+        return a.index - b.index;
+      });
+
+    const keptNames = new Set();
+    const keep = new Set();
+    for (const { device } of order) {
+      if (!device || typeof device !== 'object' || typeof device.id !== 'string') continue;
+      const name = typeof device.name === 'string' ? device.name : '';
+      const reason = (() => {
+        if (device.revoked === true) return 'revoked';
+        if (typeof device.tokenHash !== 'string' || !/^[0-9a-f]{64}$/.test(device.tokenHash)) return 'invalid';
+        if (keptNames.has(name)) return 'duplicate';
+        if (maxAgeDays > 0 && t - activityOf(device) > maxAgeDays * 86400 * 1000) return 'expired';
+        return null;
+      })();
+      if (reason !== null) {
+        removed.push({ id: device.id, name, reason });
+        continue;
+      }
+      keptNames.add(name);
+      keep.add(device);
+    }
+
+    if (removed.length > 0) {
+      atomicWriteJson(paths().devicesPath, devices.filter((device) => keep.has(device)));
+    }
+    return { removed, kept: keep.size };
+  }
+
+  /** Most recent evidence that this device still exists, in epoch ms. */
+  function activityOf(device) {
+    if (!device || typeof device !== 'object') return 0;
+    const seen = typeof device.lastSeenAt === 'number' ? device.lastSeenAt : 0;
+    const created = typeof device.createdAt === 'number' ? device.createdAt : 0;
+    return Math.max(seen, created);
+  }
+
   /**
    * Revoke a device by id (sets revoked + revokedAt). Idempotent for an
    * already-revoked device. Returns null when the id is unknown.
@@ -210,8 +277,8 @@ export function createDeviceStore(deps = {}) {
     return { rawToken, device };
   }
 
-  return { issuePairing, completePairing, verifyDevice, listDevices, revokeDevice, rotateDeviceToken };
+  return { issuePairing, completePairing, verifyDevice, listDevices, revokeDevice, rotateDeviceToken, pruneDevices };
 }
 
 // Convenience default store bound to the process environment.
-export const { issuePairing, completePairing, verifyDevice, listDevices, revokeDevice, rotateDeviceToken } = createDeviceStore();
+export const { issuePairing, completePairing, verifyDevice, listDevices, revokeDevice, rotateDeviceToken, pruneDevices } = createDeviceStore();

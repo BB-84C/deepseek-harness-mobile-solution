@@ -8,7 +8,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 
 import { createGateway } from '../src/gateway.js';
-import { createDeviceStore } from '@bb-84c/dsh-mobile-common/devices.js';
+import { createDeviceStore, sha256Hex } from '@bb-84c/dsh-mobile-common/devices.js';
 import { mobilePaths } from '@bb-84c/dsh-mobile-common/home.js';
 
 let tmpHome;
@@ -535,6 +535,144 @@ test('relay mode presents proxied requests as loopback (host rewritten, origin s
     assert.strictEqual(body.origin, null);
   } finally {
     await gwR.stop();
+  }
+});
+
+// --- upstream browser-token handshake (dsh >= 0.1.2-rc.1) -------------------
+
+/** Fake dsh web that gates `/` on a launch token exactly like upstream does. */
+async function startGatedTarget() {
+  const seen = { acceptEncoding: [], navigation401: 0 };
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, 'http://localhost');
+    const cookieHeader = String(req.headers.cookie ?? '');
+    if (url.pathname === '/') {
+      if (url.searchParams.get('token') === 'tok-123') {
+        // Upstream mints the authority-bound cookie and redirects to clean ./.
+        res.writeHead(303, {
+          location: './',
+          'set-cookie': 'dsh-auth-test=v1.signed; HttpOnly; Path=/; SameSite=Strict; Max-Age=2592000',
+        });
+        res.end();
+        return;
+      }
+      if (!cookieHeader.includes('dsh-auth-test=')) {
+        seen.navigation401 += 1;
+        seen.acceptEncoding.push(req.headers['accept-encoding'] ?? null);
+        res.writeHead(401, { 'content-type': 'text/plain' });
+        res.end('unauthorized');
+        return;
+      }
+      const html = '<!doctype html><html><head><title>t</title></head><body>ok</body></html>';
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(html);
+      return;
+    }
+    res.writeHead(404, { 'content-type': 'text/plain' });
+    res.end('nope');
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  return { server, port: server.address().port, seen };
+}
+
+test('upstream launch token: 401 navigation is answered with a token redirect', async () => {
+  const gated = await startGatedTarget();
+  const localStore = createDeviceStore({ paths: () => mobilePaths(testEnv) });
+  const gw = createGateway({
+    env: testEnv,
+    pid: 424243,
+    targetPort: gated.port,
+    config: { mode: 'tailscale', gatewayPort: 3081, relay: {}, tailscale: {}, auth: { sessionTtlDays: 30 } },
+    devices: localStore,
+    tailscale: FAKE_TS,
+    relayStatus: () => null,
+    launchToken: () => 'tok-123',
+  });
+  const { port } = await gw.start();
+  try {
+    const pending = localStore.issuePairing({ name: 'token-phone' });
+    const pairRes = await request(`/mobile/pair?code=${pending.pairingCode}`, {}, port);
+    const sidCookie = cookie(pairRes.headers);
+    assert.ok(sidCookie.startsWith('dsh_mobile_sid='));
+
+    // 1. The phone holds OUR device session but not upstream's cookie: the
+    //    upstream 401 must become a token redirect on our own origin.
+    const bounced = await request('/', { headers: { cookie: sidCookie, accept: 'text/html,application/xhtml+xml' } }, port);
+    assert.strictEqual(bounced.status, 302);
+    assert.strictEqual(bounced.headers.location, '/?token=tok-123');
+
+    // 2. Following it lets upstream mint its cookie, which we relay unchanged.
+    const exchanged = await request('/?token=tok-123', { headers: { cookie: sidCookie, accept: 'text/html' } }, port);
+    assert.strictEqual(exchanged.status, 303);
+    assert.match(String(exchanged.headers['set-cookie']), /dsh-auth-test=v1\.signed/);
+
+    // 3. With upstream's cookie the page is served, and the launch-token
+    //    exchange did not leak the token to the upstream as a header.
+    const page = await request('/', {
+      headers: { cookie: `${sidCookie}; dsh-auth-test=v1.signed`, accept: 'text/html' },
+    }, port);
+    assert.strictEqual(page.status, 200);
+    assert.ok(page.text().includes('<title>t</title>'));
+
+    // 4. A navigation asks upstream for the identity encoding so the
+    //    secure-context polyfill can be injected into uncompressed HTML.
+    assert.strictEqual(gated.seen.navigation401, 1);
+    assert.strictEqual(gated.seen.acceptEncoding[0], null);
+  } finally {
+    await gw.stop();
+    await new Promise((r) => gated.server.close(r));
+  }
+});
+
+test('without a token provider the upstream 401 is relayed unchanged', async () => {
+  const gated = await startGatedTarget();
+  const gw = createGateway({
+    env: testEnv,
+    pid: 424244,
+    targetPort: gated.port,
+    config: { mode: 'tailscale', gatewayPort: 3081, relay: {}, tailscale: {}, auth: { sessionTtlDays: 30 } },
+    devices: store,
+    tailscale: FAKE_TS,
+    relayStatus: () => null,
+  });
+  const { port } = await gw.start();
+  try {
+    const pending = store.issuePairing({ name: 'legacy-phone' });
+    const pairRes = await request(`/mobile/pair?code=${pending.pairingCode}`, {}, port);
+    const sidCookie = cookie(pairRes.headers);
+    const res = await request('/', { headers: { cookie: sidCookie, accept: 'text/html' } }, port);
+    assert.strictEqual(res.status, 401);
+  } finally {
+    await gw.stop();
+    await new Promise((r) => gated.server.close(r));
+  }
+});
+
+test('gateway start prunes stale device records', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-gw-prune-'));
+  const pruneEnv = { ...testEnv, MOBILE_HOME: dir };
+  const pruneStore = createDeviceStore({ paths: () => mobilePaths(pruneEnv) });
+  await fs.mkdir(path.join(dir, 'data'), { recursive: true });
+  await fs.writeFile(path.join(dir, 'data', 'devices.json'), JSON.stringify([
+    { id: 'dead', name: 'iPhone', tokenHash: sha256Hex('x'), createdAt: 1, lastSeenAt: 1, revoked: true, revokedAt: 2 },
+    { id: 'live', name: 'Pixel', tokenHash: sha256Hex('y'), createdAt: Date.now(), lastSeenAt: Date.now(), revoked: false, revokedAt: null },
+  ]), 'utf8');
+  const gw = createGateway({
+    env: pruneEnv,
+    pid: 424245,
+    targetPort,
+    config: { mode: 'tailscale', gatewayPort: 3081, relay: {}, tailscale: {}, auth: { sessionTtlDays: 30 } },
+    devices: pruneStore,
+    tailscale: FAKE_TS,
+    relayStatus: () => null,
+  });
+  await gw.start();
+  try {
+    const onDisk = JSON.parse(await fs.readFile(path.join(dir, 'data', 'devices.json'), 'utf8'));
+    assert.deepEqual(onDisk.map((d) => d.id), ['live']);
+  } finally {
+    await gw.stop();
+    await fs.rm(dir, { recursive: true, force: true });
   }
 });
 

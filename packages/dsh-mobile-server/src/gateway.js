@@ -182,6 +182,27 @@ function resolveHost(config) {
   return ip || '0.0.0.0';
 }
 
+/**
+ * Port of the official dsh web this gateway proxies to.
+ *
+ * The resident instance always owns 3080 (one-instance principle), so there is
+ * no user-facing knob; `DSH_MOBILE_WEB_PORT` exists so tests and unusual
+ * deployments can point the proxy at another loopback port.
+ * @param {object} env process environment
+ * @param {object} config resolved mobile config
+ * @returns {number} loopback port of the official web
+ */
+function resolveTargetPort(env, config) {
+  const fromEnv = env && env.DSH_MOBILE_WEB_PORT;
+  if (fromEnv !== undefined && fromEnv !== '') {
+    const parsed = Number(fromEnv);
+    if (Number.isInteger(parsed) && parsed > 0 && parsed <= 65535) return parsed;
+  }
+  const configured = config && config.webPort;
+  if (Number.isInteger(configured) && configured > 0 && configured <= 65535) return configured;
+  return 3080;
+}
+
 function json(res, status, obj) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(obj));
@@ -228,13 +249,14 @@ export function createGateway(deps = {}) {
     tailscale = null,
     relayStatus = readRelayStatus,
     resumeGuard = null,
+    launchToken = null,
   } = deps;
 
   const effectiveConfig = config ?? loadConfig(env).config;
   const paths = () => mobilePaths(env);
   const port = resolvePort(env, effectiveConfig);
   const host = resolveHost(effectiveConfig);
-  const target = targetPort ?? 3080;
+  const target = targetPort ?? resolveTargetPort(env, effectiveConfig);
   const auditLogPath = logPath ?? path.join(paths().logsDir, 'gateway.log');
   const sessionTtlDays = (effectiveConfig.auth && effectiveConfig.auth.sessionTtlDays) || 30;
   const sessionTtlMs = sessionTtlDays * 86400 * 1000;
@@ -545,6 +567,57 @@ export function createGateway(deps = {}) {
     return `/instance/${encodeURIComponent(instanceId())}${pathname}`;
   }
 
+  // --- official web browser-token handshake (upstream >= 0.1.2-rc.1) --------
+  //
+  // Upstream's `dsh-client-connection` mints a per-process launch token and
+  // gates the served index on it: `GET /` without a valid token or the signed
+  // `dsh-auth-*` cookie answers 401, and `/api` plus WebSocket upgrades require
+  // an authenticated peer. A phone reaching us has OUR device session, not
+  // upstream's cookie, so we exchange the token on its behalf: when the
+  // upstream answers 401 for a browser navigation, redirect the phone to the
+  // same path carrying `?token=` (through our own origin), let upstream answer
+  // 303 + `Set-Cookie`, and relay that cookie back. Every later request and
+  // upgrade then authenticates exactly as the desktop browser does.
+  //
+  // `launchToken()` is supplied by the plugin (in-process
+  // `connection.authenticatedUrl()`); it returns null on upstream versions
+  // without browser auth, where proxying stays transparent.
+  const TOKEN_TTL_MS = 60 * 1000;
+  let cachedLaunchToken = null;
+  let cachedLaunchTokenAt = 0;
+  let warnedMissingToken = false;
+
+  /** Current upstream launch token, or null when this upstream has none. */
+  function currentLaunchToken() {
+    if (typeof launchToken !== 'function') return null;
+    const t = now();
+    if (cachedLaunchToken !== null && t - cachedLaunchTokenAt < TOKEN_TTL_MS) return cachedLaunchToken;
+    let value = null;
+    try {
+      const candidate = launchToken();
+      if (typeof candidate === 'string' && candidate !== '') value = candidate;
+    } catch {
+      value = null;
+    }
+    cachedLaunchToken = value;
+    cachedLaunchTokenAt = t;
+    return value;
+  }
+
+  /** Whether this request is a top-level HTML navigation (the upstream-gated index). */
+  function isBrowserNavigation(req) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+    const accept = req.headers && req.headers.accept;
+    return typeof accept === 'string' && accept.toLowerCase().includes('text/html');
+  }
+
+  /** Same request target with the launch token as its `token` query parameter. */
+  function withToken(url, token) {
+    const parsed = new URL(url, 'http://localhost');
+    parsed.searchParams.set('token', token);
+    return entryPath(`${parsed.pathname}${parsed.search}`);
+  }
+
   function renderLogin(res, { next = '', error = '', status = 200 } = {}) {
     const nextVal = safeNext(next) === '/' ? '' : escapeHtml(safeNext(next));
     const errorHtml = error ? `<p class="error">${escapeHtml(error)}</p>` : '';
@@ -674,9 +747,29 @@ export function createGateway(deps = {}) {
     if (!authz.ok) {
       return json(res, authz.status, { error: authz.status === 403 ? 'owner required' : 'unauthorized' });
     }
+    const pruned = pruneDeviceRecords();
     const list = devicesApi.listDevices();
     const owner = list.find((d) => !d.revoked);
-    json(res, 200, { devices: list, ownerId: owner ? owner.id : null });
+    json(res, 200, { devices: list, ownerId: owner ? owner.id : null, pruned: pruned.removed.length });
+  }
+
+  /**
+   * Drop device records that can no longer authenticate: revoked ones, ones
+   * without a usable token hash, re-pairing duplicates under the same name, and
+   * ones unseen for the inactivity horizon. Older stores only appended, so a
+   * phone that re-paired left a trail of identical-looking entries behind.
+   * @returns {{ removed: Array<object>, kept: number }} cleanup report
+   */
+  function pruneDeviceRecords() {
+    if (typeof devicesApi.pruneDevices !== 'function') return { removed: [], kept: 0 };
+    try {
+      const report = devicesApi.pruneDevices();
+      if (report.removed.length > 0) audit('device_prune', { removed: report.removed.length });
+      return report;
+    } catch (error) {
+      audit('device_prune_failed', { error: String(error && error.message ? error.message : error) });
+      return { removed: [], kept: 0 };
+    }
   }
 
   function handleDeleteDevice(req, res, id) {
@@ -785,6 +878,14 @@ export function createGateway(deps = {}) {
 
   function forward(req, res, deviceId, preReadBody = null) {
     const headers = filterHeaders(req.headers, HOP_BY_HOP);
+    const navigation = isBrowserNavigation(req);
+    if (navigation) {
+      // Upstream servers newer dsh compose gzip on HTML responses
+      // (`webserver.compression`). Our secure-context polyfill has to be
+      // injected into the HTML, which is impossible on compressed bytes, so a
+      // navigation asks for the identity encoding; static assets keep theirs.
+      delete headers['accept-encoding'];
+    }
     // Relay mode: the tunnel's fetch forbids a custom Host header, so the web
     // app would see Host: 127.0.0.1:<gatewayPort> while the browser's requests
     // carry Origin: https://<relay-host> — the official trust fence then
@@ -805,6 +906,23 @@ export function createGateway(deps = {}) {
         headers,
       },
       (proxyRes) => {
+        // Upstream browser-auth gate: exchange the launch token for the phone.
+        if (proxyRes.statusCode === 401 && navigation) {
+          const token = currentLaunchToken();
+          if (token !== null) {
+            proxyRes.resume();
+            audit('web_token_bounce', { path: req.url });
+            return redirect(res, withToken(req.url, token));
+          }
+          if (!warnedMissingToken) {
+            warnedMissingToken = true;
+            // eslint-disable-next-line no-console
+            console.warn(
+              '[dsh-mobile-server] upstream answered 401 for the index but no launch token is available; ' +
+                'the phone will see the 401 (check that the dsh web profile mounts dsh-client-connection)',
+            );
+          }
+        }
         let upstreamEnded = false;
         const resHeaders = filterHeaders(proxyRes.headers, HOP_BY_HOP);
         resHeaders['x-dsh-mobile-gateway'] = '1';
@@ -961,6 +1079,7 @@ export function createGateway(deps = {}) {
       ensureMobileDirs(env);
       fs.mkdirSync(path.dirname(sessionsFilePath), { recursive: true });
       loadSessions();
+      pruneDeviceRecords();
       writeSidecar();
       const factory = serverFactory || ((handler) => http.createServer(handler));
       server = factory(handleRequest);
@@ -1033,10 +1152,12 @@ export function createGateway(deps = {}) {
 // ---------------------------------------------------------------------------
 
 /**
- * @param {{ ctx?: object }} [params]
+ * @param {{ ctx?: object, launchToken?: (() => string|null)|null, targetPort?: number }} [params]
+ *   `launchToken` supplies the upstream browser-auth token (dsh >= 0.1.2-rc.1);
+ *   omit it on older dsh versions where proxying is transparent.
  * @returns {Promise<{ stop(): void }>}
  */
-export async function startGateway({ ctx } = {}) {
+export async function startGateway({ ctx, launchToken = null, targetPort = null } = {}) {
   const env = process.env;
   const loaded = loadConfig(env);
   if (!loaded.valid || loaded.errors.length > 0) {
@@ -1051,7 +1172,7 @@ export async function startGateway({ ctx } = {}) {
     typeof sessionsService?.get === 'function'
       ? { dshHome: path.dirname(mobilePaths(env).home), sessions: sessionsService }
       : null;
-  const gateway = createGateway({ env, config: loaded.config, resumeGuard });
+  const gateway = createGateway({ env, config: loaded.config, resumeGuard, launchToken, ...(targetPort === null ? {} : { targetPort }) });
   await gateway.start();
   return { stop: () => gateway.stop() };
 }

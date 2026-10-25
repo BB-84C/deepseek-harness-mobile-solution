@@ -14,9 +14,26 @@ import { spawn as nodeSpawn, spawnSync as nodeSpawnSync } from 'node:child_proce
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { mobilePaths } from './home.js';
 import { atomicWriteJson } from './fsutil.js';
 import { whichCommand } from './which.js';
+
+/**
+ * Absolute path of the Windows "no console window" preload.
+ *
+ * The resident instance is spawned detached, so it owns no console; Windows
+ * then allocates a VISIBLE console window for every console-subsystem child it
+ * spawns (the agent's `pwsh` tool calls, git, taskkill, …). Preloading this
+ * shim with `--require` makes every spawn in that process pass
+ * `windowsHide: true` (CREATE_NO_WINDOW). See src/no-console-window.cjs.
+ *
+ * A `--require` preload is required rather than an in-process patch: builtin
+ * ESM named imports (`import { spawn } from 'node:child_process'`, which is how
+ * dsh's subprocess layer imports it) are snapshotted on first import, so a
+ * later monkey-patch would be invisible.
+ */
+export const NO_CONSOLE_WINDOW_SHIM = fileURLToPath(new URL('./no-console-window.cjs', import.meta.url));
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for direct unit testing without spawning anything)
@@ -124,7 +141,21 @@ export function readLogTail(logPath, tailN = 50) {
  */
 export function resolveDshBinary(env = process.env, platform = process.platform, spawnImpl = nodeSpawnSync) {
   if (env && env.DSH_BIN) return path.resolve(env.DSH_BIN);
-  return whichCommand('dsh', platform, spawnImpl);
+  const found = whichCommand('dsh', platform, spawnImpl);
+  if (found === null || platform !== 'win32') return found;
+  // `where.exe dsh` lists the extensionless sh shim first on Windows; that file
+  // is a POSIX script and spawning it fails. Prefer the cmd/exe sibling, which
+  // CreateProcess can actually execute.
+  if (path.extname(found) !== '') return found;
+  for (const extension of ['.cmd', '.exe', '.ps1']) {
+    const candidate = `${found}${extension}`;
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch {
+      // ignore unreadable candidates
+    }
+  }
+  return found;
 }
 
 /**
@@ -312,6 +343,17 @@ export function createService(deps = {}) {
     let launchBin = bin;
     const args = [];
     if (platform === 'win32' && !env?.DSH_BIN && process.argv[1]) {
+      // A detached instance owns no console, so Windows would allocate a
+      // visible console window for every child it spawns. The preload turns
+      // every spawn in that process into CREATE_NO_WINDOW. Guarded: a missing
+      // shim must not stop the resident instance from starting.
+      let shim = null;
+      try {
+        if (fs.existsSync(NO_CONSOLE_WINDOW_SHIM)) shim = NO_CONSOLE_WINDOW_SHIM;
+      } catch {
+        shim = null;
+      }
+      if (shim !== null) args.push('--require', shim);
       args.push(process.argv[1]);
       launchBin = process.execPath;
     }

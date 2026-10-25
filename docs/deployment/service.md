@@ -23,6 +23,16 @@ dsh --profile mobile service logs       # last 50 lines; logs [n] for n lines
 - State: pidfile `$DSH_HOME/mobile/pid.json`, logs
   `$DSH_HOME/mobile/logs/service.log`, per-instance sidecar
   `$DSH_HOME/mobile/instances/<pid>.json`.
+- **Windows: no flashing console windows.** The service is spawned detached, so
+  the resident process owns no console — and Windows gives every console child
+  it starts (agent `pwsh` tool calls, `git`, `taskkill`, `tailscale`) its own
+  *visible* console window. `service start` therefore adds
+  `node --require …/dsh-mobile-common/src/no-console-window.cjs`, a preload that
+  passes `windowsHide: true` (`CREATE_NO_WINDOW`) to every spawn in that process.
+  It must be a preload rather than a runtime patch: dsh imports `spawn` as a
+  builtin ESM named import, and those bindings are snapshotted at first import.
+  The setting takes effect for a process started *after* the update — restart
+  the service once after upgrading the plugins. macOS/Linux are unaffected.
 - **Kill safety (by design):** `stop`/`restart` only kill a process whose pid,
   start token, and sidecar all match the pidfile. Anything else — including a
   plain `dsh web` you started yourself — is refused loudly. This is the red

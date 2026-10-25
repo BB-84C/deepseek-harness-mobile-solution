@@ -40,6 +40,18 @@ nodeLinker: hoisted
 autoInstallPeers: false
 `;
 const BASE_BUNDLES = ["@deepseek-ai/dsh-base"];
+/**
+ * Shipped profile templates we mirror when a profile does not exist yet.
+ * `@deepseek-ai/dsh-app-boot`'s `PROFILE_TEMPLATES` ships
+ * `web = [@deepseek-ai/dsh-base, @deepseek-ai/dsh-web-app]`; without the
+ * web-app bundle the `web` profile has no web server, no frontend, and no
+ * command line of its own, so `dsh --profile web` boots an inert tree and the
+ * resident instance serves nothing. Re-check on every upstream upgrade.
+ */
+const PROFILE_SEED_BUNDLES = {
+  mobile: [...BASE_BUNDLES],
+  web: [...BASE_BUNDLES, "@deepseek-ai/dsh-web-app"],
+};
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
@@ -58,7 +70,7 @@ function initProfile(dir, name) {
       name: `dsh-profile-${name}`,
       private: true,
       dependencies: {},
-      dsh: { profile: { bundles: [...BASE_BUNDLES] } },
+      dsh: { profile: { bundles: [...(PROFILE_SEED_BUNDLES[name] ?? BASE_BUNDLES)] } },
     });
   }
   const patchPath = join(dir, "cordis.patch.yml");
@@ -111,6 +123,12 @@ function installProfile(name) {
   const manifest = readJson(manifestPath);
   const dependencies = manifest.dependencies ?? {};
   const bundles = manifest.dsh?.profile?.bundles ?? [];
+  // Repair a profile seeded by an older installer (or by a pre-existing bare
+  // profile) that is missing a shipped bundle: the web profile must carry
+  // `@deepseek-ai/dsh-web-app` or the resident instance serves no GUI.
+  for (const bundle of PROFILE_SEED_BUNDLES[name] ?? BASE_BUNDLES) {
+    if (!bundles.includes(bundle)) bundles.push(bundle);
+  }
   for (const pkgDir of PROFILE_PACKAGES[name] ?? []) {
     const pkgName = `@bb-84c/${pkgDir}`;
     if (!existsSync(join(REPO_ROOT, "packages", pkgDir, "package.json"))) {

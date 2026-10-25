@@ -24,6 +24,22 @@
 **一句话**：CLI 侧（`dsh --profile mobile`）和插件卸载/组合机制**没坏**（实测全通）；
 坏的是**「官方 web 不再裸奔，浏览器必须先拿令牌」**这一条 —— gateway 是唯一需要重写的部件。
 
+## 0.1 M8 修复结果（2026-10-25）
+
+| 项 | 改动 | 证据 |
+| --- | --- | --- |
+| P0 令牌握手 | gateway：导航请求被上游 401 时 302 到本网关同源的 `/?token=<launchToken>`；token 由 `ctx.get('connection').authenticatedUrl()` 逐次惰性获取（**不能**在 `inject` 里声明：本 cordis 把 `inject` 当字符串数组，对象形式会导致插件永远 pending、整个 web profile 启动失败） | 模拟手机 E2E 打真 0.2.1-rc.2：`7/7` 通过（配对 → 401 → token → 303+`dsh-auth-*` cookie → 200 UI → `/api` Origin 匹配不再 403） |
+| P0 `--trusted-host` | `computeAuthorities()` 只产出裸 `host[:port]`（`canonicalAuthority()`，IPv6 补括号、去 scheme/path/userinfo） | 单测 8 例（`url.test.js`）；relay 模式不再喂出带路径的 base |
+| P1 HTML gzip | 导航类请求（`GET` + `accept: text/html`）不透传 `accept-encoding` → 上游返回 identity HTML，polyfill 注入恢复；静态资源仍压缩 | E2E 断言 200 页面含 `crypto.randomUUID`（37.6 KB 未压缩） |
+| P2 installer | `web` profile 按官方模板播种 `[dsh-base, dsh-web-app]`，并对**已有** profile 补齐缺失的 shipped bundle | 隔离 home 全新安装后 web profile 三 bundle 就位，`dsh --profile web` 正常起 |
+| P2 doctor | 打印 dsh 版本 + 是否在「已实测清单」内 + 当前处于令牌闸门的哪一侧 | `checkDshVersion` 单测；`doctor` 直接给出 `0.1.0-rc.6 (verified) — no browser token` 之类结论 |
+| P2 设备清理 | 新增 `pruneDevices()`：删撤销/无有效哈希/**同名旧记录**/30 天未见的设备；`status`、`device list`、网关启动、devices API 自动执行；新增 `device prune [--days n]` | 单测 3 例 + gateway 启动清理用例；`status` 只列活跃设备并提示清理数 |
+| P2 弹窗（Windows） | 常驻实例以 `node --require no-console-window.cjs` 启动，进程内所有 spawn 默认 `windowsHide: true`（CREATE_NO_WINDOW） | 探针验证：ESM 具名导入能看到补丁、`windowsHide:true` 抵达 native、显式 `false` 不被覆盖；**需重启常驻实例生效** |
+| P3 hydrate 前提 | 0.2.x 的 `dsh-api-session-controller` 已把 persisted 会话（cold）并入列表（`list()` 里 live + `summaryCold` 合并），SSE 页面不再依赖 apiproxy | 源码核对（`lib/index.js` list 投影）；我们的 hydrate 保留为**只读诊断**（逐会话 `inspect` + 报错原因），ATTACH 仍默认关闭 |
+
+回归面：`npm test` 154/154 通过；同一份新代码在**本机安装的 0.1.0-rc.6** 上照样启动正常
+（web profile 起、gateway 监听、hydrate 报告正常）——即升级前后都能跑。
+
 ## 1. 验证环境
 
 | 项 | 值 |

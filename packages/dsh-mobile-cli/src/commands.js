@@ -7,15 +7,16 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import os from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureMobileDirs, logsDir, resolveMobileHome } from "@bb-84c/dsh-mobile-common/home.js";
 import { loadConfig, saveConfig, setConfigValue, getConfigValue } from "@bb-84c/dsh-mobile-common/config.js";
 import * as tailscale from "@bb-84c/dsh-mobile-common/tailscale.js";
 import * as service from "@bb-84c/dsh-mobile-common/service.js";
 import * as devices from "@bb-84c/dsh-mobile-common/devices.js";
-import { buildAccessUrl, pairingUrl } from "@bb-84c/dsh-mobile-common/url.js";
+import { buildAccessUrl, pairingUrl, canonicalAuthority } from "@bb-84c/dsh-mobile-common/url.js";
 import { diagnose, checkPortFree } from "@bb-84c/dsh-mobile-common/doctor.js";
 import { readRelayStatus } from "@bb-84c/dsh-mobile-common/relay-status.js";
 
@@ -88,22 +89,34 @@ async function waitResidentReady(config, timeoutMs = 30000) {
   }
 }
 
+/**
+ * Reduce anything URL-ish to the bare `host[:port]` authority that upstream's
+ * `assertTrustedAuthority` accepts, or null when nothing usable is left.
+ * Implemented in dsh-mobile-common (url.js) so it is unit-tested there.
+ */
+export { canonicalAuthority };
+
 /** Compute the --trusted-host authorities for the resident web instance:
  * the browser's origin after the gateway proxies it must pass the official
- * /api trust fence. Feed every plausible literal form. */
+ * /api trust fence. Feed every plausible literal form, canonical only. */
 async function computeAuthorities(config) {
   const port = String(config.gatewayPort ?? 3081);
+  const raw = [];
   if (config.mode === "relay") {
-    const base = (config.relay?.url ?? "").replace(/^https?:\/\//, "").replace(/\/+$/, "");
-    if (!base) fail("relay.url is not configured; run: dsh --profile mobile relay connect <relay-url>");
-    // The browser origin is the relay host[:port] (path prefixes, if any, are
-    // not part of the authority). Dedupe covers the no-path case.
-    return unique([base, base.split("/")[0]]);
+    const url = config.relay?.url ?? "";
+    if (url.trim() === "") fail("relay.url is not configured; run: dsh --profile mobile relay connect <relay-url>");
+    // Only the authority matters: path prefixes in the relay URL are not part
+    // of it, and upstream refuses a value that carries one.
+    const authority = canonicalAuthority(url);
+    if (authority !== null) raw.push(authority);
+  } else {
+    const ip = tailscale.tailscaleIp4();
+    const host = tailscale.tailscaleHostname();
+    if (!ip && !host) fail("tailscale is not up; run: dsh --profile mobile tailscale connect");
+    raw.push(ip, `${ip}:${port}`, host, `${host}:${port}`);
   }
-  const ip = tailscale.tailscaleIp4();
-  const host = tailscale.tailscaleHostname();
-  if (!ip && !host) fail("tailscale is not up; run: dsh --profile mobile tailscale connect");
-  return unique([ip, `${ip}:${port}`, host, `${host}:${port}`]);
+  const canonical = raw.map(canonicalAuthority).filter((value) => value !== null);
+  return unique(canonical);
 }
 
 async function mobileUrl(config) {
@@ -162,9 +175,10 @@ async function cmdStatus() {
     console.log(`relay       : ${config.relay?.url ?? "(not configured)"} as ${config.relay?.instanceId ?? "?"}`);
   }
 
+  const pruned = devices.pruneDevices();
   const list = devices.listDevices();
   const active = list.filter((d) => !d.revoked);
-  console.log(`devices     : ${active.length} active, ${list.length - active.length} revoked`);
+  console.log(`devices     : ${active.length} active${pruned.removed.length > 0 ? `, ${pruned.removed.length} stale removed` : ""}`);
   for (const d of active) console.log(`  device    : ${d.name} (${d.id}) last seen ${d.lastSeenAt ? new Date(d.lastSeenAt).toISOString() : "never"}`);
 
   let url = "";
@@ -458,13 +472,30 @@ async function cmdDevice(args, options) {
       console.log(`  open on the phone : ${pairingUrl({ accessUrl: access, pairingCode: pending.pairingCode })}`);
       console.log(`  or enter the code : ${pending.pairingCode}`);
       console.log("(the device token is delivered to the device itself on first exchange)");
+      const sameName = devices.listDevices().filter((d) => !d.revoked && d.name === options.name);
+      if (sameName.length > 0) {
+        console.log(`note: ${sameName.length} existing device record(s) named "${options.name}" — the newest pairing wins;`);
+        console.log("      stale ones are cleaned up by `device prune` (also run by status/service start)");
+      }
       return 0;
     }
     case "list": {
+      const pruned = devices.pruneDevices();
+      if (pruned.removed.length > 0) console.log(`(removed ${pruned.removed.length} stale device record(s))`);
       for (const device of devices.listDevices()) {
         const state = device.revoked ? "revoked" : "active";
         console.log(`${device.id}  ${device.name}  ${state}  created ${new Date(device.createdAt).toISOString()}  lastSeen ${device.lastSeenAt ? new Date(device.lastSeenAt).toISOString() : "never"}`);
       }
+      return 0;
+    }
+    case "prune": {
+      const days = options.days === undefined ? undefined : Number(options.days);
+      if (options.days !== undefined && (!Number.isInteger(days) || days < 0)) {
+        fail("prune --days must be a non-negative integer (0 keeps records regardless of age)");
+      }
+      const pruned = devices.pruneDevices(days === undefined ? {} : { maxAgeDays: days });
+      for (const entry of pruned.removed) console.log(`removed ${entry.name || "(unnamed)"} (${entry.id}) — ${entry.reason}`);
+      console.log(`device prune: removed ${pruned.removed.length}, kept ${pruned.kept}`);
       return 0;
     }
     case "revoke": {
@@ -475,7 +506,7 @@ async function cmdDevice(args, options) {
       return 0;
     }
     default:
-      fail(`unknown action ${JSON.stringify(action)} — use pair | list | revoke <id>`);
+      fail(`unknown action ${JSON.stringify(action)} — use pair | list | prune | revoke <id>`);
   }
 }
 
@@ -517,9 +548,62 @@ async function cmdConfig(args) {
   }
 }
 
+/**
+ * The installed dsh version, read from the launcher itself (`dsh --version`).
+ * Reading the package.json would need the installation path, which differs per
+ * package manager and global prefix; the binary already knows.
+ * @returns {string|null} e.g. "0.2.1-rc.2", or null when unavailable
+ */
+/**
+ * The dsh CLI's JavaScript entry, when the resolved binary is an npm shim.
+ *
+ * The npm global layout puts `dsh`/`dsh.cmd` beside
+ * `node_modules/@deepseek-ai/dsh/lib/bin.js`; running that entry with the
+ * current node avoids batch-file quoting entirely.
+ * @param {string} bin resolved `dsh` binary
+ * @returns {string|null} absolute path of lib/bin.js, or null
+ */
+function dshEntryFor(bin) {
+  try {
+    if (/\.js$/i.test(bin)) return bin;
+    const entry = join(dirname(bin), "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
+    return existsSync(entry) ? entry : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The installed dsh version, read from the launcher itself (`dsh --version`).
+ * Reading the package.json would need the installation path, which differs per
+ * package manager and global prefix; the binary already knows.
+ * @returns {string|null} e.g. "0.2.1-rc.2", or null when unavailable
+ */
+function probeDshVersion() {
+  const bin = service.resolveDshBinary();
+  if (!bin) return null;
+  const options = { encoding: "utf8", timeout: 20000, windowsHide: true };
+  try {
+    const entry = dshEntryFor(bin);
+    let result;
+    if (entry !== null) result = spawnSync(process.execPath, [entry, "--version"], options);
+    else if (process.platform === "win32" && /\.(cmd|bat)$/i.test(bin)) {
+      // A batch shim cannot be spawned directly; cmd.exe resolves it. `/s` is
+      // omitted on purpose — it would require the nested-quote form that cmd
+      // then rejects for a quoted path.
+      result = spawnSync(process.env.ComSpec || "cmd.exe", ["/d", "/c", `${bin} --version`], options);
+    } else result = spawnSync(bin, ["--version"], options);
+    const text = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+    const match = /\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?/.exec(text);
+    return match ? match[0] : null;
+  } catch {
+    return null;
+  }
+}
+
 async function cmdDoctor() {
   const config = mustConfig();
-  const findings = await diagnose({ config });
+  const findings = await diagnose({ config, probes: { dshVersion: probeDshVersion } });
   let worst = 0;
   for (const finding of findings) {
     const mark = finding.level === "error" ? "✗" : finding.level === "warn" ? "!" : "✓";

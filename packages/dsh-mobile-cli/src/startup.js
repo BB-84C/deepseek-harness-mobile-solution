@@ -62,9 +62,12 @@ const SUBCOMMANDS = [
   },
   {
     name: "device",
-    description: "device pairing and management — pair | list | revoke <id>",
+    description: "device pairing and management — pair | list | prune [--days n] | revoke <id>",
     argsDesc: "<action> [id]",
-    options: [["--name <name>", "device name (pair)"]],
+    options: [
+      ["--name <name>", "device name (pair)"],
+      ["--days <n>", "prune: drop devices unseen for n days (0 = keep by age; default 30)"],
+    ],
   },
   {
     name: "url",

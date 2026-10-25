@@ -199,7 +199,7 @@ update                        升级两个插件（转发 dsh plugin update）�
 | M5 | 部署与文档 | tailscale/VPS relay 部署脚本与教程、插件安装说明、三平台自启模板 | 🔄 文档/脚本已写，实测待 M7 |
 | M6 | 移动 UI/UX specs | mobile-web / mobile-app（Android+iOS）specs（交其他 agent） | ⏸ 推迟（2026-08 决定：官方更新期先骑官方 Web UI，app 复兴时 WebView 包装优先，见 specs/mobile-app.md §0） |
 | M7 | 端到端验收 | 本机 tailscale P2P 实测 + relay 模拟实测；README 完善；发布前检查 | ✅ 本机全链路通过（详见 docs/acceptance.md；第二设备/VPS/多平台项待用户复核） |
-| M8 | 上游 0.2.x 适配 | 浏览器启动令牌握手、`--trusted-host` 规范化、HTML 注入恢复、installer 模板化 | 🔄 影响面已评估并实测复现（`docs/research/upstream-0.2-impact.md`），代码未改 |
+| M8 | 上游 0.2.x 适配 | 浏览器启动令牌握手、`--trusted-host` 规范化、HTML 注入恢复、installer 模板化、设备清理、Windows 静默子进程 | ✅ 完成：`npm test` 154/154；模拟手机 E2E 打真 0.2.1-rc.2 7/7；rc.6 回归通过 |
 
 当前进度：**全部里程碑代码完成，本机端到端验收通过**（docs/acceptance.md，2026-08-14）：
 tailscale 点对点（gateway 绑 tailnet 可达、配对、官方 SPA 代理、撤销踢会话、限速、开放重定向防护）
@@ -242,6 +242,20 @@ relay owner passkey 注册（可选）；移动 app 已决定**推迟**（战略
   应改用官方 `PROFILE_TEMPLATES.web`。另有：官方 Web UI 新增 Plugins 页/Config Editor（手机可改宿主，
   需补威胁模型与验收）；`dsh-host-apiproxy` 停更（改 `dsh-api-*` over Typert Remote），hydrate 前提待复验。
 → 任务已立为 **M8（上游 0.2.x 适配）**，改动清单见评估文档 §9。
+
+2026-10-25 更新（M8 完成）：P0–P3 全部落地，`npm test` 154/154，模拟手机 E2E 打真
+`0.2.1-rc.2` **7/7 通过**（配对 → 上游 401 → 令牌 302 → 303+`dsh-auth-*` cookie →
+200 官方 UI + polyfill 注入 → `/api` Origin 匹配不再 403），同一份代码在本机 `0.1.0-rc.6`
+上回归启动正常。同时修掉两处长期问题：
+- **Windows 弹窗**：常驻实例由 `node --require no-console-window.cjs` 启动，进程内所有子进程
+  （agent 的 pwsh 工具、git、taskkill、tailscale）默认 `windowsHide: true`。注意 `--require`
+  必须走预加载——dsh 用 ESM 具名导入 `spawn`，运行时打补丁无效。**旧实例需重启一次才生效**
+  （`dsh --profile mobile service restart`）。
+- **设备列表膨胀**：新增 `pruneDevices()`（删撤销/无有效哈希/同名旧记录/30 天未见）+ `device prune`，
+  `status`、`device list`、网关启动、devices API 都会自动清理。
+踩坑记录：cordis 的 `inject` 在本版本只接受**字符串数组**，写成 `{required, optional}` 会被当成
+两个名为 "required"/"optional" 的服务，插件永远 pending → 整个 web profile 启动失败（已被隔离环境
+验证拦下，未污染现网）。可选服务一律在 `apply`/调用点用 `ctx.get()` 惰性取。
 
 ## 5. 仓库布局
 

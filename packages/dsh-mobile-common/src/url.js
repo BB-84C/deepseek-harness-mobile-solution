@@ -49,3 +49,40 @@ export function pairingUrl({ accessUrl, pairingCode } = {}) {
   const base = String(accessUrl || '').replace(/\/+$/, '');
   return `${base}/mobile/pair?code=${encodeURIComponent(String(pairingCode ?? ''))}`;
 }
+
+/**
+ * Reduce anything URL-ish to the bare `host[:port]` authority that dsh's
+ * `--trusted-host` accepts, or null when nothing usable is left.
+ *
+ * dsh >= 0.2 validates every `--trusted-host` value with
+ * `assertTrustedAuthority` and FAILS PLUGIN LOAD — the resident web never
+ * starts — for anything that is not a canonical bare authority: a scheme, a
+ * path, a trailing slash, userinfo, a zero-padded port, or unbracketed IPv6.
+ * Older versions parsed leniently, so non-canonical input used to be harmless.
+ * @param {string} value raw authority, bare host, or full URL
+ * @returns {string|null} canonical authority, lowercased, IPv6 bracketed
+ */
+export function canonicalAuthority(value) {
+  if (typeof value !== 'string') return null;
+  const raw = value.trim();
+  if (raw === '') return null;
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw);
+  /** Parse, bracketing a bare IPv6 literal first (WHATWG requires brackets). */
+  const parse = (text) => {
+    try {
+      return new URL(text);
+    } catch {
+      return null;
+    }
+  };
+  let url = parse(withScheme ? raw : `http://${raw}`);
+  if (url === null && !withScheme && raw.split(':').length > 2) {
+    // Unbracketed IPv6 (e.g. a tailnet v6 address): bracket it and retry.
+    url = parse(`http://[${raw.replace(/^\[|\]$/g, '')}]`);
+  }
+  if (url === null || url.hostname === '') return null;
+  // WHATWG returns IPv6 hostnames WITH brackets; re-add exactly one pair.
+  const bare = url.hostname.replace(/^\[|\]$/g, '');
+  const host = bare.includes(':') ? `[${bare}]` : bare;
+  return url.port === '' ? host.toLowerCase() : `${host.toLowerCase()}:${url.port}`;
+}

@@ -121,3 +121,71 @@ test('revokeDevice returns null for an unknown id', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+/** Write a devices.json fixture directly so each rule can be exercised. */
+function seedDevices(tmp, records) {
+  fs.mkdirSync(path.join(tmp, 'data'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'data', 'devices.json'), JSON.stringify(records, null, 2), 'utf8');
+}
+
+function device(id, name, overrides = {}) {
+  return {
+    id,
+    name,
+    tokenHash: sha256Hex(`token-${id}`),
+    createdAt: 1_000,
+    lastSeenAt: 1_000,
+    revoked: false,
+    revokedAt: null,
+    ...overrides,
+  };
+}
+
+test('pruneDevices drops revoked, invalid, duplicate-name and expired records', () => {
+  const { store, tmp } = makeStore();
+  try {
+    const day = 86_400_000;
+    const now = 1_000 + 90 * day;
+    seedDevices(tmp, [
+      device('a', 'iPhone', { lastSeenAt: 1_000 + 89 * day }), // newest iPhone -> kept
+      device('b', 'iPhone', { lastSeenAt: 1_000 + 1 * day }), // older duplicate -> dropped
+      device('c', 'Pixel', { revoked: true, revokedAt: 1_000 }), // revoked -> dropped
+      device('d', 'Tablet', { tokenHash: 'not-a-hash' }), // unusable hash -> dropped
+      device('e', 'Old', { lastSeenAt: 1_000 + 1 * day }), // inactive > 30 days -> dropped
+      device('f', 'Laptop', { lastSeenAt: 1_000 + 80 * day }), // kept
+    ]);
+    const report = store.pruneDevices({ now });
+    assert.equal(report.kept, 2);
+    const reasons = Object.fromEntries(report.removed.map((entry) => [entry.id, entry.reason]));
+    assert.deepEqual(reasons, { b: 'duplicate', c: 'revoked', d: 'invalid', e: 'expired' });
+    assert.deepEqual(store.listDevices().map((entry) => entry.id).sort(), ['a', 'f']);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('pruneDevices keeps records regardless of age when maxAgeDays is 0', () => {
+  const { store, tmp } = makeStore();
+  try {
+    seedDevices(tmp, [device('a', 'Old', { lastSeenAt: 1_000 }), device('b', 'New', { lastSeenAt: 1_000 + 400 * 86_400_000 })]);
+    const report = store.pruneDevices({ now: 1_000 + 500 * 86_400_000, maxAgeDays: 0 });
+    assert.deepEqual(report.removed, []);
+    assert.equal(report.kept, 2);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('pruneDevices leaves the file untouched when nothing is stale', () => {
+  const { store, tmp } = makeStore();
+  try {
+    seedDevices(tmp, [device('a', 'iPhone')]);
+    const before = fs.readFileSync(path.join(tmp, 'data', 'devices.json'), 'utf8');
+    const report = store.pruneDevices({ now: 2_000 });
+    assert.deepEqual(report.removed, []);
+    assert.equal(report.kept, 1);
+    assert.equal(fs.readFileSync(path.join(tmp, 'data', 'devices.json'), 'utf8'), before);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

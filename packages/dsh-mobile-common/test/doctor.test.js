@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { diagnose } from '../src/doctor.js';
+import { diagnose, checkDshVersion, compareDshVersions, VERIFIED_DSH_VERSIONS } from '../src/doctor.js';
 import { defaultConfig } from '../src/config.js';
 
 function findCheck(results, check) {
@@ -17,6 +17,7 @@ const happyProbes = {
   tailscaleStatus: () => ({ ok: true, data: { BackendState: 'Running' } }),
   tailscaleIp4: () => '100.1.2.3',
   resolveDshBinary: () => '/usr/bin/dsh',
+  dshVersion: () => '0.2.1-rc.2',
   checkPortFree: async () => ({ free: true }),
   checkWritable: () => ({ writable: true }),
   checkRelay: async () => ({ ok: true, status: 200 }),
@@ -32,6 +33,7 @@ test('doctor reports ok for a healthy tailscale setup', async () => {
   assert.ok(findCheck(results, 'config'));
   assert.ok(findCheck(results, 'node'));
   assert.ok(findCheck(results, 'dsh binary'));
+  assert.ok(findCheck(results, 'dsh version'));
   assert.ok(findCheck(results, 'tailscale binary'));
   assert.ok(findCheck(results, 'tailscale up'));
   assert.ok(findCheck(results, 'tailscale ip'));
@@ -138,4 +140,28 @@ test('checkLlmCredentials finds env, settings, credentials and .env sources', as
   const none = checkLlmCredentials({ env: {}, home: path.join(dshHome, 'mobile'), cwd: tmp, homedir: tmp });
   assert.equal(none.level, 'error');
   await fs.promises.rm(tmp, { recursive: true, force: true });
+});
+
+test('compareDshVersions orders prereleases below their release', () => {
+  assert.ok(compareDshVersions('0.1.1-rc.2', '0.1.2-rc.1') < 0);
+  assert.ok(compareDshVersions('0.1.2-rc.1', '0.1.2') < 0);
+  assert.ok(compareDshVersions('0.1.0-rc.10', '0.1.0-rc.9') > 0);
+  assert.equal(compareDshVersions('0.2.1-rc.2', '0.2.1-rc.2'), 0);
+  assert.ok(compareDshVersions('0.2.1-rc.2', '0.3.0') < 0);
+});
+
+test('checkDshVersion reports the verified list and the token-gate boundary', () => {
+  for (const version of VERIFIED_DSH_VERSIONS) {
+    assert.equal(checkDshVersion(version).level, 'ok');
+  }
+  // 0.1.0-rc.6 predates browser-token auth; 0.2.1-rc.2 is behind it.
+  assert.match(checkDshVersion('0.1.0-rc.6').detail, /no browser token/);
+  assert.match(checkDshVersion('0.2.1-rc.2').detail, /browser-token handshake active/);
+  // An untested version warns instead of silently passing.
+  const untested = checkDshVersion('0.3.0');
+  assert.equal(untested.level, 'warn');
+  assert.match(untested.detail, /not in the verified list/);
+  // Unknown version (probe unavailable) also warns, with a pointer.
+  assert.equal(checkDshVersion(null).level, 'warn');
+  assert.equal(checkDshVersion('garbage').level, 'warn');
 });

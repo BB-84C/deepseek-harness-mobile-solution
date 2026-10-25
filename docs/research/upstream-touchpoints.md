@@ -65,8 +65,10 @@
 | 2026-08 | 信任围栏对 Origin/Host 的比对 | gateway relay 模式改写 Host 为环回 + 剥离 Origin |
 | 2026-08 | WS 升级被 relay 404 | relay 增加 wreq/wdata/wend 字节管道 |
 | 2026-08 | 官方前端全路径相对化依赖 Host | 根路径改为服务端渲染菜单 + cookie 路由（不再依赖路径前缀） |
-| 2026-10 | **浏览器启动令牌**（0.1.2-rc.1 起）：`GET /` 必须 `?token=` 换 30 天 authority 绑定 cookie，否则 401；`/api`+WS 必须有已认证 Peer | ⏳ 待改：gateway 可选注入 `connection`，401 时 302 手机到 `/?token=`（设计见 `upstream-0.2-impact.md` §2） |
-| 2026-10 | **`--trusted-host` 严格校验**（0.2.x）：非裸 `host[:port]` 直接让 plugin load 失败 | ⏳ 待改：`computeAuthorities()` 规范化（relay 模式不再带路径前缀） |
-| 2026-10 | 官方 HTML **gzip**（0.2.x `webserver.compression`） | ⏳ 待改：导航请求不透传 `accept-encoding`，恢复 polyfill 注入 |
-| 2026-10 | 插件**版本兼容闸门**（`engines.dsh`/peers + `compatibility.json` + `allow-version`） | 我们未声明约束 → 实测不被拒，暂无需动作；决定是否声明见 §1 |
-| 2026-10 | Web UI 内建 **Plugins 页 / Config Editor**（Typert Remote，可重组合树） | ⏳ 待验收：手机端装/卸插件后我们的 bundle 仍在、`status` 正常 |
+| 2026-10 | **浏览器启动令牌**（0.1.2-rc.1 起）：`GET /` 必须 `?token=` 换 30 天 authority 绑定 cookie，否则 401；`/api`+WS 必须有已认证 Peer | ✅ M8：gateway 惰性取 `connection.authenticatedUrl()`，导航 401 → 302 到同源 `/?token=`，cookie 全透传（E2E 7/7） |
+| 2026-10 | **`--trusted-host` 严格校验**（0.2.x）：非裸 `host[:port]` 直接让 plugin load 失败 | ✅ M8：`canonicalAuthority()` 统一规范化（IPv6 补括号、去 scheme/path），单测覆盖 |
+| 2026-10 | 官方 HTML **gzip**（0.2.x `webserver.compression`） | ✅ M8：导航请求不透传 `accept-encoding`，polyfill 注入恢复（静态资源仍压缩） |
+| 2026-10 | 插件**版本兼容闸门**（`engines.dsh`/peers + `compatibility.json` + `allow-version`） | 我们未声明约束 → 实测不被拒；`doctor` 现在会报 dsh 版本与已实测清单 |
+| 2026-10 | Web UI 内建 **Plugins 页 / Config Editor**（Typert Remote，可重组合树） | ⏳ 仍待真机验收：手机端装/卸插件后我们的 bundle 仍在、`status` 正常（见 impact 文档 §7） |
+| 2026-10 | cordis 的 **`inject` 只吃字符串数组**（对象形式被当成服务名 → 插件永远 pending → 整个 profile 启动失败） | ✅ 可选服务一律 `ctx.get()` 惰性取；已写进 impact 文档踩坑记录 |
+| 2026-08 | 常驻实例无 console → Windows 给每个子进程新建可见控制台窗口（弹窗） | ✅ M8：`node --require no-console-window.cjs` 预加载 `windowsHide: true`；需重启常驻实例生效 |
