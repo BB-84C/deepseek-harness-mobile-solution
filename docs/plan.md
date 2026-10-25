@@ -199,6 +199,7 @@ update                        升级两个插件（转发 dsh plugin update）�
 | M5 | 部署与文档 | tailscale/VPS relay 部署脚本与教程、插件安装说明、三平台自启模板 | 🔄 文档/脚本已写，实测待 M7 |
 | M6 | 移动 UI/UX specs | mobile-web / mobile-app（Android+iOS）specs（交其他 agent） | ⏸ 推迟（2026-08 决定：官方更新期先骑官方 Web UI，app 复兴时 WebView 包装优先，见 specs/mobile-app.md §0） |
 | M7 | 端到端验收 | 本机 tailscale P2P 实测 + relay 模拟实测；README 完善；发布前检查 | ✅ 本机全链路通过（详见 docs/acceptance.md；第二设备/VPS/多平台项待用户复核） |
+| M8 | 上游 0.2.x 适配 | 浏览器启动令牌握手、`--trusted-host` 规范化、HTML 注入恢复、installer 模板化 | 🔄 影响面已评估并实测复现（`docs/research/upstream-0.2-impact.md`），代码未改 |
 
 当前进度：**全部里程碑代码完成，本机端到端验收通过**（docs/acceptance.md，2026-08-14）：
 tailscale 点对点（gateway 绑 tailnet 可达、配对、官方 SPA 代理、撤销踢会话、限速、开放重定向防护）
@@ -222,6 +223,25 @@ tailscale 点对点（gateway 绑 tailnet 可达、配对、官方 SPA 代理、
 剩余事项：多实例 fan-in 实测（第二台机器注册 relay）、macOS/Linux 上 CLI/常驻服务实测（浏览器访问已测）、
 relay owner passkey 注册（可选）；移动 app 已决定**推迟**（战略：骑官方 Web UI 存活，官方升级适配面
 已最小化并台账化，见 `docs/research/upstream-touchpoints.md`）。
+
+2026-10-25 更新：**上游 0.2.x 升级影响评估完成**（`docs/research/upstream-0.2-impact.md`）。
+本机基线仍是 `0.1.0-rc.6`，npm `latest` 已是 `0.2.1-rc.2`（跨 30+ 个 rc）。在隔离 `$DSH_HOME`
+里全新安装 0.2.1-rc.2 实测结论：
+- ✅ **CLI 侧无碍**：`dsh --profile mobile --help|doctor|config show` 全通；`dsh.bundle.patch`、
+  cmdline 契约、`sessions`/`sessionPersistence`、web 默认 `127.0.0.1:3080` 与 `/api`+WS 模式、
+  我们的 `directory-picker` patch 行均正常（未触发新的兼容闸门 `engines.dsh`）。
+- 🔴 **P0-1 浏览器启动令牌**：0.1.2-rc.1 起官方 `GET /` 必须 `?token=<launchToken>` 换 30 天
+  authority 绑定 cookie，否则 **401**；`/api`+WS 必须有已认证 Peer。→ 手机进不去官方 UI，
+  gateway 需补「401 → 302 到 `/?token=`」的握手（同进程可用 `ctx.connection.authenticatedUrl()`）。
+- 🔴 **P0-2 `--trusted-host` 严格校验**：非裸 `host[:port]` 直接 plugin load 失败；
+  我们 relay 模式的 `computeAuthorities()` 在 relay URL 带路径前缀时会喂出非规范项
+  → **常驻实例起不来**（本机 `https://dsh.bb84.ai` 无路径，暂未触发，属潜伏 bug）。
+- 🟠 **P1 HTML gzip**：官方 web 现在压缩 HTML → 我们的 `crypto.randomUUID` polyfill 注入静默失效
+  （tailscale 明文模式手机可能出现前端报错）。
+- 🟡 **P2 installer**：干净机器上 `web` profile 被我们只播种 `dsh-base`（无 `dsh-web-app`）→ 空转；
+  应改用官方 `PROFILE_TEMPLATES.web`。另有：官方 Web UI 新增 Plugins 页/Config Editor（手机可改宿主，
+  需补威胁模型与验收）；`dsh-host-apiproxy` 停更（改 `dsh-api-*` over Typert Remote），hydrate 前提待复验。
+→ 任务已立为 **M8（上游 0.2.x 适配）**，改动清单见评估文档 §9。
 
 ## 5. 仓库布局
 
@@ -261,6 +281,10 @@ deepseek-harness-mobile-solution/
 ## 7. 风险与注意
 
 - **官方 dsh 升级破坏兼容**：依赖 rc.6 的插件机制与启动器行为；doctor 检查版本；CI 无（私有仓库）。
+  **已发生**：`0.1.2-rc.1` 起官方 web 加了浏览器启动令牌（`GET /` 无 token → 401），
+  我们把基线 rc.6 的 web 当"裸 HTTP"用 → 升到该版本后手机端 401 白屏；另有 `--trusted-host`
+  严格校验（relay 模式会启动失败）与 HTML gzip（polyfill 注入失效）。评估与修复清单见
+  `docs/research/upstream-0.2-impact.md`，任务号 M8。**升级前必须先做 M8 的 P0 两项。**
 - **网关即新增攻击面**：认证先于一切路由、限速、审计日志；安全模型文档化（docs/deployment 内含 threat model 节）。
 - **误杀非 mobile 实例**：pidfile + 创建时间 + 启动令牌三重校验（用户红线要求）。
 - **沙箱限制**：本 agent 测试 tailscale/gh/git 网络类命令可能被沙箱挡，按需升级重试。

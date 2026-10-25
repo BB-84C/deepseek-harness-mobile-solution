@@ -20,6 +20,8 @@
 | 行 `directory-picker`（disabled） | 远程浏览器无法弹本机对话框，禁掉 auto 行 | 若官方移除该行/改 id，我们的 patch 会 no-op（无害，但远端换目录功能退化为 browse 行） |
 | 行 `directory-picker-browse`（insert） | 钉住浏览器目录选择器供远程用 | 官方移除 `dsh-host-directory-picker-browse` 包则该行失效 → 远端无法换 workspace（session 列表不受影响） |
 | `dsh.bundle.patch` 机制本身 | CLI/server 插件靠它挂进 profile | loader patch 语法若有破坏性变更 → 安装脚本需适配 |
+| `engines.dsh` / dsh peer 兼容闸门（0.2.x 新增） | 我们**未声明**任何约束 → 判定「无约束」，不被拒 | 若我们以后声明 `engines.dsh`，上游每次升级都要同步 bump，否则 bundle 被 skip、row 被 deny（豁免：`dsh plugin allow-version`）。详见 `upstream-0.2-impact.md` §6 |
+| profile 模板名集合（0.2.x: acp/web/headless/sdk/sdk-minimal） | `mobile` 是自定义 profile，不撞名 | 官方若新增名为 `mobile` 的 shipped 模板 → 我们的 profile 会被判为保留名而无法初始化 |
 
 ## 2. 服务注入依赖（gateway / hydrate 插件）
 
@@ -27,6 +29,7 @@
 | --- | --- | --- |
 | `sessions` | hydrate 判断 live/冷 + session-live 守卫读 live 状态 | 服务名/形状变化 → hydrate 启动告警（有日志） |
 | `sessionPersistence` | `list()`/`inspect()` 冷会话枚举与预检 | 方法签名变化 → hydrate 报 `not hydratable`（有日志，可观测） |
+| `connection`（0.2.x 起需**可选注入**） | 取**浏览器启动令牌**（`connection.authenticatedUrl(base)`）→ 让手机换到官方 cookie | **0.1.2-rc.1 起官方 `GET /` 需令牌，否则 401**；缺该服务/方法时 gateway 必须降级为旧行为（见 `upstream-0.2-impact.md` §2） |
 | `webServer`（经 dsh-web 内部） | 官方 `/api` 面由 web app 自己提供，我们只反代 | 我们**不注入**它——风险为零 |
 
 > 复验方式：升级官方 dsh 后运行 `npm test`（hydrate/guard 有离线测试）+ 看
@@ -40,6 +43,9 @@
 | `/api/events.mux` / `/api/events.host` 的 WS 升级 | relay 隧道字节管道 | 会话实时流式输出（肉眼确认 token 逐字出现） |
 | `/plugins/events` SSE | 事件流透传 | 同上，顺带确认无控制台报错 |
 | 信任围栏（`dsh-client-connection` 的 Host/Origin 校验） | gateway 以环回身份 + 剥离 Origin 呈现 | 围栏逻辑若加强（如新增头校验）→ 手机 `/api` 403 时优先查这里；见 `gateway.js` relay 分支 |
+| **浏览器启动令牌**（0.1.2-rc.1 起：`GET /` 无 `?token=`/cookie → 401） | gateway 需向手机补发一次 `/?token=<launchToken>` 握手，之后透传 `dsh-auth-*` cookie | 手机白屏/401 时先查这里；见 `upstream-0.2-impact.md` §2 |
+| `--trusted-host` 严格校验（0.2.x：非裸 `host[:port]` → plugin load 失败） | `computeAuthorities()` 必须只产出规范 authority（relay URL 带路径前缀时会破） | 常驻实例起不来时先查这里；见 `upstream-0.2-impact.md` §3 |
+| 官方 HTML gzip（0.2.x `webserver.compression: gzip`） | HTML 注入（`crypto.randomUUID` polyfill）需让导航请求以 identity 编码拿到 HTML | tailscale 明文模式下手机功能异常时查这里；见 `upstream-0.2-impact.md` §4 |
 | 官方前端静态资源（`/assets/*`、`/plugins/*/client.js`、boot HTML 注入 polyfill） | 全透传 + HTML 注入 | 手机 UI 能打开即通过 |
 
 ## 4. 官方升级后的冒烟清单（10 分钟）
@@ -59,3 +65,8 @@
 | 2026-08 | 信任围栏对 Origin/Host 的比对 | gateway relay 模式改写 Host 为环回 + 剥离 Origin |
 | 2026-08 | WS 升级被 relay 404 | relay 增加 wreq/wdata/wend 字节管道 |
 | 2026-08 | 官方前端全路径相对化依赖 Host | 根路径改为服务端渲染菜单 + cookie 路由（不再依赖路径前缀） |
+| 2026-10 | **浏览器启动令牌**（0.1.2-rc.1 起）：`GET /` 必须 `?token=` 换 30 天 authority 绑定 cookie，否则 401；`/api`+WS 必须有已认证 Peer | ⏳ 待改：gateway 可选注入 `connection`，401 时 302 手机到 `/?token=`（设计见 `upstream-0.2-impact.md` §2） |
+| 2026-10 | **`--trusted-host` 严格校验**（0.2.x）：非裸 `host[:port]` 直接让 plugin load 失败 | ⏳ 待改：`computeAuthorities()` 规范化（relay 模式不再带路径前缀） |
+| 2026-10 | 官方 HTML **gzip**（0.2.x `webserver.compression`） | ⏳ 待改：导航请求不透传 `accept-encoding`，恢复 polyfill 注入 |
+| 2026-10 | 插件**版本兼容闸门**（`engines.dsh`/peers + `compatibility.json` + `allow-version`） | 我们未声明约束 → 实测不被拒，暂无需动作；决定是否声明见 §1 |
+| 2026-10 | Web UI 内建 **Plugins 页 / Config Editor**（Typert Remote，可重组合树） | ⏳ 待验收：手机端装/卸插件后我们的 bundle 仍在、`status` 正常 |
