@@ -9,6 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node ≥22](https://img.shields.io/badge/Node-%E2%89%A522-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![dsh plugin](https://img.shields.io/badge/DeepSeek_Harness-Plugin-4D6BFE)](https://github.com/topics/dsh-plugin)
+[![dsh verified](https://img.shields.io/badge/dsh-0.1.0_%E2%80%93_0.2.1-4D6BFE)](docs/research/upstream-touchpoints.md)
 <!-- [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![GitHub stars](https://img.shields.io/github/stars/BB-84C/deepseek-harness-mobile-solution?style=social)](https://github.com/BB-84C/deepseek-harness-mobile-solution/stargazers) -->
 
@@ -48,6 +49,13 @@ Everything lives behind **`dsh --profile mobile`** — `service`, `tailscale`, `
 
 📖 [`docs/plugin-install.md`](docs/plugin-install.md)
 
+## Compatibility
+
+- **dsh**: verified on `0.1.0-rc.6` and `0.2.1-rc.2`. The gateway adapts to both sides of dsh's browser-token gate (`0.1.2-rc.1`+), so newer releases normally work unchanged.
+- **Node.js**: ≥ 22 (the relay is zero-dependency).
+- `dsh --profile mobile doctor` prints your dsh version and whether it is on the verified list.
+- After upgrading dsh, run the 10-minute checklist in [`docs/research/upstream-touchpoints.md`](docs/research/upstream-touchpoints.md).
+
 ## Features
 
 - One entry point: `dsh --profile mobile <command>`
@@ -57,7 +65,7 @@ Everything lives behind **`dsh --profile mobile`** — `service`, `tailscale`, `
 - Instance menu at your relay domain
 - One resident instance enforced; pidfile-guarded stop/restart
 - Three-OS scripts, auto-start templates
-- 144+ offline tests
+- 156 offline tests
 
 ## How it works
 
