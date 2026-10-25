@@ -12,7 +12,7 @@ import {
   NO_OPEN_SINCE,
   LAUNCH_TOKEN_SINCE,
 } from '../src/version.js';
-import { latestDesktopUrl, readDshVersion, resolveDshEntry } from '../src/service.js';
+import { latestDesktopUrl, readDshVersion, resolveDshEntry, hasPickerUi, PICKER_UI_PACKAGE } from '../src/service.js';
 
 test('parseDshVersion splits numbers and prerelease', () => {
   assert.deepEqual(parseDshVersion('0.2.1-rc.2'), { numbers: [0, 2, 1], prerelease: ['rc', '2'] });
@@ -106,6 +106,31 @@ test('readDshVersion parses the launcher output through the injected spawn', () 
     assert.equal(readDshVersion({ env: { DSH_BIN: fakeBin }, platform: 'linux', spawnImpl: () => ({ status: 0, stdout: 'no idea' }) }), null);
     // A throwing spawn must not break service start.
     assert.equal(readDshVersion({ env: { DSH_BIN: fakeBin }, platform: 'linux', spawnImpl: () => { throw new Error('boom'); } }), null);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('hasPickerUi detects the separate browse-dialog package in the installation', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-picker-ui-'));
+  try {
+    const binPath = path.join(tmp, 'dsh.cmd');
+    fs.writeFileSync(binPath, '@echo off\n');
+    const entry = path.join(tmp, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
+    fs.mkdirSync(path.dirname(entry), { recursive: true });
+    fs.writeFileSync(entry, '// entry\n');
+
+    // 0.1.x-style installation: only the host row's package exists.
+    assert.equal(hasPickerUi(binPath), false);
+
+    // 0.2-style installation: the dialog is its own package.
+    const uiPackage = path.join(tmp, 'node_modules', ...PICKER_UI_PACKAGE.split('/'), 'package.json');
+    fs.mkdirSync(path.dirname(uiPackage), { recursive: true });
+    fs.writeFileSync(uiPackage, '{"name":"x"}\n');
+    assert.equal(hasPickerUi(binPath), true);
+
+    // A binary with no resolvable entry cannot be probed.
+    assert.equal(hasPickerUi(path.join(tmp, 'elsewhere', 'dsh.cmd')), false);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

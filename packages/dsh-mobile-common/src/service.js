@@ -211,6 +211,50 @@ export function readDshVersion(options = {}) {
 }
 
 /**
+ * npm package carrying the browser-based directory-picker dialog.
+ *
+ * On dsh >= 0.2 the picker's browser half lives in its own package, discovered
+ * through its `dsh.client` declaration; the host row
+ * (`dsh-host-directory-picker-browse`) provides only the filesystem primitives.
+ * Without it a mobile browser has no dialog at all, so the workspace flow
+ * cannot ask for a directory.
+ */
+export const PICKER_UI_PACKAGE = '@deepseek-ai/dsh-client-ui-directory-picker-browse';
+
+/**
+ * Whether the running dsh installation ships the browse-picker dialog package.
+ * Older releases predate it and must not get a composed row referencing it.
+ * @param {string} bin resolved `dsh` binary
+ * @returns {boolean}
+ */
+export function hasPickerUi(bin) {
+  const entry = resolveDshEntry(bin);
+  if (entry === null) return false;
+  const segments = PICKER_UI_PACKAGE.split('/');
+  // The dsh package directory itself (`…/@deepseek-ai/dsh`) and the project
+  // root that owns the first `node_modules` in the path (npm) — pnpm keeps the
+  // package's own dependencies beside it instead.
+  const packageDir = path.dirname(path.dirname(entry));
+  const parts = entry.split(path.sep);
+  const nodeModulesIndex = parts.indexOf('node_modules');
+  const installRoot = nodeModulesIndex > 0 ? parts.slice(0, nodeModulesIndex).join(path.sep) : null;
+  const candidates = [path.join(packageDir, 'node_modules', ...segments, 'package.json')];
+  if (installRoot !== null) {
+    candidates.push(
+      path.join(installRoot, 'node_modules', ...segments, 'package.json'),
+      path.join(installRoot, 'node_modules', '@deepseek-ai', 'dsh-web-app', 'node_modules', ...segments, 'package.json'),
+    );
+  }
+  return candidates.some((candidate) => {
+    try {
+      return fs.existsSync(candidate);
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
  * The newest authenticated desktop URL the resident web printed
  * (`dsh web: http://127.0.0.1:3080/?token=...`).
  *
@@ -444,17 +488,21 @@ export function createService(deps = {}) {
     // Only releases that know the flag accept it (dsh-web-app >= 0.1.1-rc.1).
     const version = dshVersionImpl();
     if (supportsNoOpen(version)) args.push('--no-open');
+    // The browse directory picker's dialog is its own package on dsh >= 0.2;
+    // the bundle patch composes that row only when this flag says it exists.
+    const pickerUi = hasPickerUi(bin);
     const { env: childEnv, fallbackKey } = buildChildEnv(env, platform, spawnSyncImpl, {
       DSH_MOBILE_INSTANCE: '1',
       DSH_MOBILE_TOKEN: token,
       DSH_MOBILE_GATEWAY_PORT: String(config.gatewayPort ?? 3081),
+      ...(pickerUi ? { DSH_MOBILE_PICKER_UI: '1' } : {}),
     });
     try {
       const envHas = Boolean(env && typeof env.DEEPSEEK_API_KEY === 'string' && env.DEEPSEEK_API_KEY.length > 0);
       const registryHas = platform === 'win32' ? (fallbackKey ? 'yes (used)' : 'no') : 'n/a';
       fs.appendFileSync(
         logPath,
-        `[dsh-mobile-cli] start: DEEPSEEK_API_KEY in launching shell env: ${envHas}; in Windows registry: ${registryHas}; child gets key: ${Boolean(childEnv.DEEPSEEK_API_KEY)}\n`,
+        `[dsh-mobile-cli] start: DEEPSEEK_API_KEY in launching shell env: ${envHas}; in Windows registry: ${registryHas}; child gets key: ${Boolean(childEnv.DEEPSEEK_API_KEY)}; picker dialog ui: ${pickerUi}\n`,
       );
     } catch {
       // log may be gone

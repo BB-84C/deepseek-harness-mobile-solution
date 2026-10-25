@@ -40,6 +40,27 @@
 回归面：`npm test` 154/154 通过；同一份新代码在**本机安装的 0.1.0-rc.6** 上照样启动正常
 （web profile 起、gateway 监听、hydrate 报告正常）——即升级前后都能跑。
 
+## 0.2 目录选择器事故与修复（2026-10-25，用户升级到 0.2.1-rc.2 后发现）
+
+现象：停掉 mobile、直接跑本地 `dsh web`，**无法新建 workspace**（选择目录的对话框根本不出现）。
+
+根因（我们自己的插件，两个错误叠加）：
+1. `dsh-mobile-server` 的 bundle patch 把 shipped `directory-picker`（auto）行**无条件**禁掉并插入
+   `-browse` 行。该 patch 属于 `web` profile 的 bundle 层，**本地 `dsh web` 同样会应用**，
+   于是本地也失去原生选择器。
+2. 0.2.x 把选择器的**浏览器对话框**拆成独立包 `dsh-client-ui-directory-picker-browse`
+   （通过 `dsh.client` 声明进入客户端模块表），host 行
+   `dsh-host-directory-picker-browse` 只剩文件系统原语 —— 我们只 compose 了 host 行，
+   于是有 RPC、没有 UI，等于完全没有对话框。
+
+修复：
+- mobile 的三个行改为 `disabled: !!js "process.env.DSH_MOBILE_INSTANCE !== '1'"` 门控；
+  auto 行改为 `disabled: !!js "process.env.DSH_MOBILE_INSTANCE === '1'"` → 本地运行恢复出厂行为。
+- 新增 `directory-picker-browse-ui` 行，门控在 `DSH_MOBILE_PICKER_UI === '1'`；
+  `service start` 用 `hasPickerUi()`（在安装目录里探测该包）决定是否设置这个 env。
+- 实测（隔离 home + 真 0.2.1-rc.2，读服务端渲染的 boot HTML）：本地运行
+  `nativeUi=true browseUi=false`；mobile 运行 `nativeUi=false browseUi=true`。
+
 ## 1. 验证环境
 
 | 项 | 值 |

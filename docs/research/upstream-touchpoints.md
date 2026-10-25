@@ -17,8 +17,9 @@
 | 行/插件 | 我们做什么 | 官方改动风险 |
 | --- | --- | --- |
 | `web` profile 的 bundle 行集合 | `dsh --profile web` 直接复用 | 官方增删 web profile 内的行会影响 resident 的能力；升级后跑一次 `dsh --profile mobile service status` + 手机全流程 |
-| 行 `directory-picker`（disabled） | 远程浏览器无法弹本机对话框，禁掉 auto 行 | 若官方移除该行/改 id，我们的 patch 会 no-op（无害，但远端换目录功能退化为 browse 行） |
-| 行 `directory-picker-browse`（insert） | 钉住浏览器目录选择器供远程用 | 官方移除 `dsh-host-directory-picker-browse` 包则该行失效 → 远端无法换 workspace（session 列表不受影响） |
+| 行 `directory-picker`（条件 disabled） | 远程浏览器无法弹本机对话框，禁掉 auto 行；**仅在 `DSH_MOBILE_INSTANCE=1` 时** | 若官方移除该行/改 id，我们的 patch 会 no-op（无害）。⚠️ 2026-10-25 事故：该行曾被**无条件**禁掉，导致本地 `dsh web` 也没有原生选择器 → 无法新建 workspace；现已改为 env 门控 |
+| 行 `directory-picker-browse`（insert，env 门控） | 钉住浏览器目录选择器供远程用 | 官方移除 `dsh-host-directory-picker-browse` 包则该行失效 → 远端无法换 workspace |
+| 行 `directory-picker-browse-ui`（insert，0.2.x 新增包） | 选择器的**浏览器对话框**在 0.2 拆成独立包 `dsh-client-ui-directory-picker-browse`（`dsh.client` 声明）；只有 host 行 = 有 RPC 无 UI | `service start` 用 `hasPickerUi()` 探测安装里有没有该包，设 `DSH_MOBILE_PICKER_UI=1` 才 compose 这一行（旧版没有此包） |
 | `dsh.bundle.patch` 机制本身 | CLI/server 插件靠它挂进 profile | loader patch 语法若有破坏性变更 → 安装脚本需适配 |
 | `engines.dsh` / dsh peer 兼容闸门（0.2.x 新增） | 我们**未声明**任何约束 → 判定「无约束」，不被拒 | 若我们以后声明 `engines.dsh`，上游每次升级都要同步 bump，否则 bundle 被 skip、row 被 deny（豁免：`dsh plugin allow-version`）。详见 `upstream-0.2-impact.md` §6 |
 | profile 模板名集合（0.2.x: acp/web/headless/sdk/sdk-minimal） | `mobile` 是自定义 profile，不撞名 | 官方若新增名为 `mobile` 的 shipped 模板 → 我们的 profile 会被判为保留名而无法初始化 |
