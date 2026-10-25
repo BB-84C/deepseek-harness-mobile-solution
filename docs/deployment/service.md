@@ -33,6 +33,13 @@ dsh --profile mobile service logs       # last 50 lines; logs [n] for n lines
   builtin ESM named import, and those bindings are snapshotted at first import.
   The setting takes effect for a process started *after* the update — restart
   the service once after upgrading the plugins. macOS/Linux are unaffected.
+- **No browser window on start.** The resident instance is started with
+  `--no-open` (dsh >= 0.1.1-rc.1 ships that flag; older releases do not and get
+  none), so starting the service never pops the host's default browser. Since
+  dsh >= 0.1.2-rc.1 gates the loopback UI on a per-process launch token,
+  `service start` prints the authenticated URL for *this* machine instead:
+  `this machine: http://127.0.0.1:3080/?token=…`. Phones never need it — the
+  gateway performs the token handshake on their behalf.
 - **Kill safety (by design):** `stop`/`restart` only kill a process whose pid,
   start token, and sidecar all match the pidfile. Anything else — including a
   plain `dsh web` you started yourself — is refused loudly. This is the red

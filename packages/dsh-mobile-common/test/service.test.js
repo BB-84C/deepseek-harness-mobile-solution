@@ -286,6 +286,61 @@ test('start() refuses when already running', () => {
 
 // ---- command-line-facing synchronous wrappers ----
 
+/**
+ * Start a service with a recording spawn so the chosen web-profile flags can be
+ * asserted without launching anything.
+ */
+function startWithVersion(dshVersion) {
+  const spawned = [];
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-mobile-svc-nopen-'));
+  const fakeBin = path.join(tmp, 'dsh');
+  fs.writeFileSync(fakeBin, 'fake');
+  const paths = () => ({
+    pidFilePath: path.join(tmp, 'pid.json'),
+    instancesDir: path.join(tmp, 'instances'),
+    logsDir: path.join(tmp, 'logs'),
+  });
+  const svc = createService({
+    platform: 'linux',
+    env: { DSH_BIN: fakeBin },
+    paths,
+    spawnImpl: (bin, args, options) => {
+      spawned.push({ bin, args, options });
+      return { pid: 99, on() {}, unref() {} };
+    },
+    dshVersionImpl: () => dshVersion,
+    killImpl: () => {
+      const e = new Error('gone');
+      e.code = 'ESRCH';
+      throw e;
+    },
+  });
+  svc.start({ config: { gatewayPort: 3081 }, authorities: ['woody.tail.ts.net'], logPath: path.join(tmp, 'logs', 'service.log') });
+  fs.rmSync(tmp, { recursive: true, force: true });
+  return spawned[0].args;
+}
+
+test('start() passes --no-open only on releases that know the flag', () => {
+  // 0.2.x / 0.1.1+ accept it; the resident start must not pop a host browser.
+  assert.deepEqual(startWithVersion('0.2.1-rc.2'), [
+    '--profile',
+    'web',
+    '--trusted-host',
+    'woody.tail.ts.net',
+    '--no-open',
+  ]);
+  assert.deepEqual(startWithVersion('0.1.1-rc.2').slice(-1), ['--no-open']);
+  // 0.1.0-rc.x parses its own flags strictly and has no --no-open.
+  assert.deepEqual(startWithVersion('0.1.0-rc.6'), [
+    '--profile',
+    'web',
+    '--trusted-host',
+    'woody.tail.ts.net',
+  ]);
+  // An unreadable version keeps the flag set every release understands.
+  assert.deepEqual(startWithVersion(null), ['--profile', 'web', '--trusted-host', 'woody.tail.ts.net']);
+});
+
 test('checkGatewaySync uses a node fetch probe', () => {
   assert.equal(checkGatewaySync(3081, { spawnImpl: () => ({ status: 0 }) }), true);
   assert.equal(checkGatewaySync(3081, { spawnImpl: () => ({ status: 1 }) }), false);

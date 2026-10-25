@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { mobilePaths } from './home.js';
 import { atomicWriteJson } from './fsutil.js';
 import { whichCommand } from './which.js';
+import { supportsNoOpen } from './version.js';
 
 /**
  * Absolute path of the Windows "no console window" preload.
@@ -159,6 +160,76 @@ export function resolveDshBinary(env = process.env, platform = process.platform,
 }
 
 /**
+ * The dsh CLI's JavaScript entry, when the resolved binary is an npm shim.
+ *
+ * The npm global layout puts `dsh`/`dsh.cmd` beside
+ * `node_modules/@deepseek-ai/dsh/lib/bin.js`; running that entry with the
+ * current node avoids batch-file quoting entirely (used both for the
+ * `--version` probe and for the resident spawn).
+ * @param {string} bin resolved `dsh` binary
+ * @returns {string|null} absolute path of lib/bin.js, or null when unknown
+ */
+export function resolveDshEntry(bin) {
+  if (typeof bin !== 'string' || bin === '') return null;
+  try {
+    if (/\.js$/i.test(bin)) return bin;
+    const entry = path.join(path.dirname(bin), 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
+    return fs.existsSync(entry) ? entry : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read the installed dsh version by asking the launcher itself.
+ * @param {{ env?: object, platform?: NodeJS.Platform, spawnImpl?: Function }} [options]
+ * @returns {string|null} e.g. "0.2.1-rc.2", or null when unavailable
+ */
+export function readDshVersion(options = {}) {
+  const env = options.env ?? process.env;
+  const platform = options.platform ?? process.platform;
+  const spawnImpl = options.spawnImpl ?? nodeSpawnSync;
+  const bin = resolveDshBinary(env, platform, spawnImpl);
+  if (bin === null) return null;
+  const spawnOptions = { encoding: 'utf8', timeout: 20000, windowsHide: true };
+  try {
+    const entry = resolveDshEntry(bin);
+    let result;
+    if (entry !== null) result = spawnImpl(process.execPath, [entry, '--version'], spawnOptions);
+    else if (platform === 'win32' && /\.(cmd|bat)$/i.test(bin)) {
+      // A batch shim cannot be spawned directly; cmd.exe resolves it. `/s` is
+      // omitted on purpose — it would require the nested-quote form that cmd
+      // then rejects for a quoted path.
+      result = spawnImpl(env.ComSpec || 'cmd.exe', ['/d', '/c', `${bin} --version`], spawnOptions);
+    } else result = spawnImpl(bin, ['--version'], spawnOptions);
+    const text = `${(result && result.stdout) ?? ''}${(result && result.stderr) ?? ''}`.trim();
+    const match = /\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?/.exec(text);
+    return match ? match[0] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The newest authenticated desktop URL the resident web printed
+ * (`dsh web: http://127.0.0.1:3080/?token=...`).
+ *
+ * dsh >= 0.1.2-rc.1 gates the loopback index on a per-process launch token, and
+ * the resident instance starts with `--no-open`, so this URL is the only
+ * automatic hand-off for THIS machine's browser (the phone goes through the
+ * gateway's own handshake instead).
+ * @param {string} logText tail of the resident service log
+ * @returns {string|null} the token URL, or null when the log has none
+ */
+export function latestDesktopUrl(logText) {
+  if (typeof logText !== 'string' || logText === '') return null;
+  const pattern = /dsh web: (https?:\/\/[^\s]+[?&]token=[^\s]+)/g;
+  let newest = null;
+  for (const match of logText.matchAll(pattern)) newest = match[1];
+  return newest;
+}
+
+/**
  * Async gateway health check (fetch). Reference implementation with a 2s
  * timeout; returns true on any HTTP response, false on any error.
  * @param {number} port
@@ -281,6 +352,9 @@ export function createService(deps = {}) {
     killImpl = process.kill,
     sleepImpl = syncSleep,
     gatewayProbe = (port) => checkGatewaySync(port, { spawnImpl: spawnSyncImpl }),
+    // Installed dsh version, used to pick only the web-profile flags that
+    // release understands (an unknown version gets the conservative set).
+    dshVersionImpl = () => readDshVersion({ env, platform, spawnImpl: spawnSyncImpl }),
   } = deps;
 
   const pidFilePath = () => paths().pidFilePath;
@@ -364,6 +438,12 @@ export function createService(deps = {}) {
     for (const authority of authorities || []) {
       args.push('--trusted-host', authority);
     }
+    // No browser handoff on the host desktop: a resident start must not open a
+    // window (the mobile UI is reached through the gateway, and this machine's
+    // own browser gets the authenticated URL from `service start` output).
+    // Only releases that know the flag accept it (dsh-web-app >= 0.1.1-rc.1).
+    const version = dshVersionImpl();
+    if (supportsNoOpen(version)) args.push('--no-open');
     const { env: childEnv, fallbackKey } = buildChildEnv(env, platform, spawnSyncImpl, {
       DSH_MOBILE_INSTANCE: '1',
       DSH_MOBILE_TOKEN: token,

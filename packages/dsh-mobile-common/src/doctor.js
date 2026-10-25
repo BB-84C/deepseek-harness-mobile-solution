@@ -10,6 +10,14 @@ import { findTailscale, tailscaleStatus, tailscaleIp4 } from './tailscale.js';
 import { resolveDshBinary } from './service.js';
 import { mobilePaths } from './home.js';
 import { relayBaseUrl } from './url.js';
+import {
+  VERIFIED_DSH_VERSIONS,
+  LAUNCH_TOKEN_SINCE,
+  compareDshVersions,
+  needsLaunchToken,
+  parseDshVersion,
+  supportsNoOpen,
+} from './version.js';
 
 /**
  * Is a TCP port free on 127.0.0.1? Binds then immediately closes.
@@ -83,58 +91,9 @@ function nodeVersionOk(version) {
   return Number.isInteger(major) && major >= 22;
 }
 
-/**
- * dsh releases this solution has been verified against.
- * @see docs/research/upstream-0.2-impact.md
- */
-export const VERIFIED_DSH_VERSIONS = ['0.1.0-rc.6', '0.2.1-rc.2'];
-
-/**
- * First dsh release whose official web gates the browser index on a launch
- * token (`@deepseek-ai/dsh-client-connection` 0.1.2-rc.1). Our gateway performs
- * the token handshake, so both sides of this boundary are supported — the note
- * only tells the operator which world they are in when debugging.
- */
-export const LAUNCH_TOKEN_SINCE = '0.1.2-rc.1';
-
-/** Parse `major.minor.patch[-prerelease]` into comparable numbers. */
-function parseDshVersion(version) {
-  const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/.exec(String(version).trim());
-  if (!match) return null;
-  const numbers = [Number(match[1]), Number(match[2]), Number(match[3])];
-  const prerelease = match[4] === undefined ? [] : match[4].split('.');
-  return { numbers, prerelease };
-}
-
-/**
- * SemVer ordering for dsh releases (prerelease sorts before its release).
- * @param {string} a
- * @param {string} b
- * @returns {number} negative when a < b
- */
-export function compareDshVersions(a, b) {
-  const left = parseDshVersion(a);
-  const right = parseDshVersion(b);
-  if (left === null || right === null) return 0;
-  for (let index = 0; index < 3; index += 1) {
-    if (left.numbers[index] !== right.numbers[index]) return left.numbers[index] - right.numbers[index];
-  }
-  // A prerelease is lower than the release it leads to.
-  if (left.prerelease.length === 0 && right.prerelease.length === 0) return 0;
-  if (left.prerelease.length === 0) return 1;
-  if (right.prerelease.length === 0) return -1;
-  for (let index = 0; index < Math.max(left.prerelease.length, right.prerelease.length); index += 1) {
-    const l = left.prerelease[index];
-    const r = right.prerelease[index];
-    if (l === undefined) return -1;
-    if (r === undefined) return 1;
-    const ln = Number.parseInt(l, 10);
-    const rn = Number.parseInt(r, 10);
-    if (Number.isInteger(ln) && Number.isInteger(rn) && ln !== rn) return ln - rn;
-    if (l !== r) return l < r ? -1 : 1;
-  }
-  return 0;
-}
+// Version identity lives in version.js (also used by service.js for the
+// --no-open decision); re-exported here so callers and tests keep one door.
+export { VERIFIED_DSH_VERSIONS, LAUNCH_TOKEN_SINCE, compareDshVersions, parseDshVersion, needsLaunchToken, supportsNoOpen } from './version.js';
 
 /**
  * Report the running dsh version and whether our gateway's browser-token
@@ -151,8 +110,7 @@ export function checkDshVersion(version) {
       detail: 'unavailable — run `dsh --version` yourself; gateway features are chosen by feature detection',
     };
   }
-  const tokenGate = compareDshVersions(version, LAUNCH_TOKEN_SINCE) >= 0;
-  const mode = tokenGate ? 'browser-token handshake active' : 'no browser token (transparent proxy)';
+  const mode = needsLaunchToken(version) ? 'browser-token handshake active' : 'no browser token (transparent proxy)';
   if (VERIFIED_DSH_VERSIONS.includes(version)) {
     return { level: 'ok', check: 'dsh version', detail: `${version} (verified) — ${mode}` };
   }

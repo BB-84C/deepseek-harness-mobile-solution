@@ -257,6 +257,15 @@ relay owner passkey 注册（可选）；移动 app 已决定**推迟**（战略
 两个名为 "required"/"optional" 的服务，插件永远 pending → 整个 web profile 启动失败（已被隔离环境
 验证拦下，未污染现网）。可选服务一律在 `apply`/调用点用 `ctx.get()` 惰性取。
 
+2026-10-25 补充（用户已升级到 `0.2.1-rc.2`，手机端实测通过）：`doctor` 报
+`0.2.1-rc.2 (verified) — browser-token handshake active`，`gateway.log` 里能看到
+`web_token_bounce` —— 令牌握手在真实 relay 链路生效。同时发现 0.2.x 的 `dsh web` 每次启动会
+**在宿主机弹一个默认浏览器窗口**（`service.log`: `opening the default browser`）：`service start`
+现按版本传 `--no-open`（≥ 0.1.1-rc.1 才有该 flag，旧版不传），并在启动完成后打印宿主机用的
+认证 URL `this machine: http://127.0.0.1:3080/?token=…`（手机不需要它，走 gateway 握手）。
+版本边界与判定集中在 `packages/dsh-mobile-common/src/version.js`（`supportsNoOpen` /
+`needsLaunchToken` / `VERIFIED_DSH_VERSIONS`），`doctor` 与 `service start` 共用同一套判断。
+
 ## 5. 仓库布局
 
 ```

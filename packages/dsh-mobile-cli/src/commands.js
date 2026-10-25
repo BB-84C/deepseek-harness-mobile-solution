@@ -7,7 +7,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import fs, { existsSync } from "node:fs";
 import os from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +27,36 @@ const INSTALLER = join(REPO_ROOT, "scripts", "install-mobile.mjs");
 
 function fail(message) {
   throw new Error(message);
+}
+
+/**
+ * Read part of a log file without loading all of it.
+ * @param {string} filePath log path
+ * @param {number} [maxBytes] how much of the end to read at most
+ * @param {number} [fromOffset] byte offset to start at (bytes before it are skipped)
+ * @returns {string} the requested slice, or '' when the file is unreadable
+ */
+function readLogTail(filePath, maxBytes = 128 * 1024, fromOffset = 0) {
+  let fd = null;
+  try {
+    const stat = fs.statSync(filePath);
+    const start = Math.max(fromOffset, stat.size - maxBytes);
+    if (start >= stat.size) return "";
+    fd = fs.openSync(filePath, "r");
+    const buffer = Buffer.alloc(stat.size - start);
+    fs.readSync(fd, buffer, 0, buffer.length, start);
+    return buffer.toString("utf8");
+  } catch {
+    return "";
+  } finally {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // ignore
+      }
+    }
+  }
 }
 
 /** Load config with defaults; print validation problems as warnings. */
@@ -234,6 +264,15 @@ async function serviceLifecycle(action, mode, n) {
       console.warn("warning: DEEPSEEK_API_KEY is not set in THIS shell. The resident instance inherits this shell's environment, so the phone will report 'no api key configured'. Start the service from a shell where the key is set (machine-level environment variables are inherited automatically).");
     }
     const authorities = await computeAuthorities(config);
+    // Everything already in the log predates this start: only new bytes can
+    // carry THIS process's launch-token URL.
+    const logOffset = (() => {
+      try {
+        return fs.statSync(logPath).size;
+      } catch {
+        return 0;
+      }
+    })();
     const result = service.startService({ config, authorities, logPath });
     if (!result.started) {
       console.log(result.alreadyRunning ? `service already running (pid ${result.pid})` : `service failed to start: ${result.error ?? "unknown error"}`);
@@ -245,6 +284,11 @@ async function serviceLifecycle(action, mode, n) {
     console.log("pair your phone: dsh --profile mobile device pair --name <name>");
     const ready = await waitResidentReady(config);
     console.log(ready ? "resident ready — refresh the phone now" : "resident still starting — refresh the phone in a few seconds");
+    // The resident instance starts with `--no-open`, so nothing pops a window
+    // on this machine. dsh >= 0.1.2-rc.1 prints the authenticated URL for the
+    // loopback UI; surface it here so the desktop browser has a way in.
+    const desktopUrl = service.latestDesktopUrl(readLogTail(logPath, 128 * 1024, logOffset));
+    if (desktopUrl !== null) console.log(`  this machine: ${desktopUrl}`);
     return 0;
   }
 
@@ -551,54 +595,13 @@ async function cmdConfig(args) {
 /**
  * The installed dsh version, read from the launcher itself (`dsh --version`).
  * Reading the package.json would need the installation path, which differs per
- * package manager and global prefix; the binary already knows.
- * @returns {string|null} e.g. "0.2.1-rc.2", or null when unavailable
- */
-/**
- * The dsh CLI's JavaScript entry, when the resolved binary is an npm shim.
- *
- * The npm global layout puts `dsh`/`dsh.cmd` beside
- * `node_modules/@deepseek-ai/dsh/lib/bin.js`; running that entry with the
- * current node avoids batch-file quoting entirely.
- * @param {string} bin resolved `dsh` binary
- * @returns {string|null} absolute path of lib/bin.js, or null
- */
-function dshEntryFor(bin) {
-  try {
-    if (/\.js$/i.test(bin)) return bin;
-    const entry = join(dirname(bin), "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
-    return existsSync(entry) ? entry : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The installed dsh version, read from the launcher itself (`dsh --version`).
- * Reading the package.json would need the installation path, which differs per
- * package manager and global prefix; the binary already knows.
+ * package manager and global prefix; the binary already knows. The probe lives
+ * in dsh-mobile-common because the service start needs the same answer to pick
+ * version-appropriate web flags.
  * @returns {string|null} e.g. "0.2.1-rc.2", or null when unavailable
  */
 function probeDshVersion() {
-  const bin = service.resolveDshBinary();
-  if (!bin) return null;
-  const options = { encoding: "utf8", timeout: 20000, windowsHide: true };
-  try {
-    const entry = dshEntryFor(bin);
-    let result;
-    if (entry !== null) result = spawnSync(process.execPath, [entry, "--version"], options);
-    else if (process.platform === "win32" && /\.(cmd|bat)$/i.test(bin)) {
-      // A batch shim cannot be spawned directly; cmd.exe resolves it. `/s` is
-      // omitted on purpose — it would require the nested-quote form that cmd
-      // then rejects for a quoted path.
-      result = spawnSync(process.env.ComSpec || "cmd.exe", ["/d", "/c", `${bin} --version`], options);
-    } else result = spawnSync(bin, ["--version"], options);
-    const text = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
-    const match = /\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?/.exec(text);
-    return match ? match[0] : null;
-  } catch {
-    return null;
-  }
+  return service.readDshVersion();
 }
 
 async function cmdDoctor() {
