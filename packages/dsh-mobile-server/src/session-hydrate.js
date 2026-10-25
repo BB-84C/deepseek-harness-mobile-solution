@@ -82,11 +82,14 @@ export const inject = ["sessions", "sessionPersistence"];
 export async function reconcile({ sessions, persistence, attach = false, signal, logger, onAttach }) {
   const report = { found: 0, live: 0, cold: 0, results: [] };
 
-  const headers = await persistence.list(signal);
-  report.found = Array.isArray(headers) ? headers.length : 0;
+  const entries = await persistence.list(signal);
+  report.found = Array.isArray(entries) ? entries.length : 0;
 
-  for (const header of headers ?? []) {
+  for (const entry of entries ?? []) {
     if (signal?.aborted) break;
+    // dsh >= 0.2 returns snapshots `{ header, formatStatus, revision, sizeBytes }`;
+    // older releases returned the bare header. Accept both shapes.
+    const header = entry?.header ?? entry;
     const id = header?.id;
     if (typeof id !== "string" || id === "") continue;
 
@@ -99,7 +102,7 @@ export async function reconcile({ sessions, persistence, attach = false, signal,
     const result = { id, cwd: header?.cwd, ok: false, attached: false, error: undefined };
 
     try {
-      if (attach) {
+      if (attach && typeof persistence.prepare === "function") {
         // OFFICIAL resume-to-cold transaction (dsh-agent-loop/lib/index.js:1159-1161,
         // 1277, 1287): prepare -> enter -> announce -> dispose the preparation.
         const preparation = await persistence.prepare(id, signal);
@@ -116,8 +119,10 @@ export async function reconcile({ sessions, persistence, attach = false, signal,
             /* preparation release is best-effort */
           }
         }
-      } else {
+      } else if (typeof persistence.inspect === "function") {
         // SAFE read-only validation + pre-warm (no publish, no durable repair).
+        // Removed in dsh 0.2.x, where `list()` already reads every generation
+        // header under the store's own recovery rules.
         await persistence.inspect(id, signal);
       }
       result.ok = true;

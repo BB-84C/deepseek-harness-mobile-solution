@@ -262,3 +262,44 @@ test("reconcile tolerates a missing/empty header id", async () => {
   assert.equal(report.cold, 0);
   assert.equal(report.results.length, 0);
 });
+
+test("reconcile accepts the dsh 0.2 snapshot shape ({ header, formatStatus, ... })", async () => {
+  const persistence = mockPersistence({
+    headers: [
+      { header: { id: "n-1", cwd: "D:\\\\w" }, formatStatus: "current", revision: "r1", sizeBytes: 10 },
+      { header: { id: "n-2", cwd: "D:\\\\w" }, formatStatus: "current", revision: "r2", sizeBytes: 20 },
+    ],
+  });
+  const sessions = mockSessions(["n-1"]);
+
+  const report = await reconcile({ sessions, persistence, logger: silentLogger });
+
+  assert.equal(report.found, 2);
+  assert.equal(report.live, 1);
+  assert.equal(report.cold, 1);
+  assert.deepEqual(
+    report.results.map((r) => [r.id, r.cwd, r.ok]),
+    [["n-2", "D:\\\\w", true]],
+  );
+});
+
+test("reconcile degrades gracefully when the upstream removed inspect()", async () => {
+  const calls = { list: 0 };
+  const persistence = {
+    calls,
+    async list() {
+      calls.list += 1;
+      return [{ header: { id: "x-1", cwd: "/w" } }];
+    },
+    // no inspect(), no prepare() — dsh 0.2.x surface
+  };
+  const sessions = mockSessions();
+  const warnings = [];
+
+  const report = await reconcile({ sessions, persistence, logger: { warn: (m) => warnings.push(m) } });
+
+  assert.equal(report.found, 1);
+  assert.equal(report.cold, 1);
+  assert.deepEqual(report.results.map((r) => [r.id, r.ok, r.attached]), [["x-1", true, false]]);
+  assert.equal(warnings.length, 0);
+});

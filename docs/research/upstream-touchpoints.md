@@ -72,3 +72,4 @@
 | 2026-10 | Web UI 内建 **Plugins 页 / Config Editor**（Typert Remote，可重组合树） | ⏳ 仍待真机验收：手机端装/卸插件后我们的 bundle 仍在、`status` 正常（见 impact 文档 §7） |
 | 2026-10 | cordis 的 **`inject` 只吃字符串数组**（对象形式被当成服务名 → 插件永远 pending → 整个 profile 启动失败） | ✅ 可选服务一律 `ctx.get()` 惰性取；已写进 impact 文档踩坑记录 |
 | 2026-08 | 常驻实例无 console → Windows 给每个子进程新建可见控制台窗口（弹窗） | ✅ M8：`node --require no-console-window.cjs` 预加载 `windowsHide: true`；需重启常驻实例生效 |
+| 2026-10 | `sessionPersistence.list()` 返回**快照包装** `{ header, formatStatus, revision, sizeBytes }`（0.1.x 是裸 header），且 `inspect(id)`/`prepare(id)` 已从服务面移除 | ✅ hydrate 同时接受两种形状并降级：无 `inspect` 时只枚举计数（0.2 的 `list()` 自身已按存储恢复规则读取每个 generation 头），无 `prepare` 时 ATTACH 模式自动跳过；新增 2 例回归测试 |
