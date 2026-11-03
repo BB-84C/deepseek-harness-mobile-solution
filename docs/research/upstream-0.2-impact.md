@@ -9,6 +9,42 @@
 > **实测**（在隔离 `$DSH_HOME` 里用 `0.2.1-rc.2` 全新安装跑我们的两个 profile）。
 > 未改动本机常驻实例（3080/3081 全程未被占用）。
 
+## 0.-1 后续复查：0.2.1-rc.2 → 0.2.1-rc.5（2026-11-03）
+
+上游又发了 3 个 rc：rc.3（10-23）、rc.4（10-26）、rc.5（10-29，现为 `latest` 与 `next`；
+`alpha` 已到 0.2.2-alpha.2）。复查方法与 M8 相同：把 `0.2.1-rc.5` 装进独立前缀，
+与已安装的 rc.2 逐包做文件级哈希比对。
+
+**包级事实**：我们依赖的 18 个包（web-app、client-connection、host-webserver、
+session-persistence(-jsonl)、app-boot、cmdline、plugin-manager、三个 directory-picker 包、
+api-session-controller、workspace、base、client-modules、host-frontend-static、session、
+web-frontend）里，**除 `package.json` 版本号外只有 4 处真实变化**：
+
+| 包 | 变化 | 对我们的影响 |
+| --- | --- | --- |
+| `dsh-web-app` | `cordis.patch.yml` **纯新增**一行 client row `entry-customization`（0.2.1-rc.3 的「More 菜单」） | 无：我们不改这一行，客户端资源走 gateway 透传 |
+| `dsh-web-frontend` | dist 重建（index.html / assets 换 hash） | 无（透传） |
+| `dsh-client-ui-agent-preset` | `lib/client.js` + 类型（UI） | 无（客户端，透传） |
+| `dsh-api-session-controller` | `lib/types/client/sessions/service.d.ts` | 无（客户端类型） |
+| `dsh-client-modules` | 仅构建常量 `commit` 变化 | 无：我们的 `directory-picker-browse-ui` client row 仍被发现 |
+
+命令行契约（`--no-open` / `--trusted-host` / `--port`）、bundle patch 机制、兼容闸门、
+令牌握手（`connection.authenticatedUrl`）、`sessionPersistence` 形状、压缩配置、
+目录选择器行 id 全部**未变**。
+
+**实测（隔离 `$DSH_HOME` + 真 0.2.1-rc.5）**：
+- `readDshVersion = 0.2.1-rc.5`，`supportsNoOpen = true`、`needsLaunchToken = true`、
+  `hasPickerUi = true`（三个版本判断都对）；
+- `dsh --profile mobile --help` 正常；
+- mobile 实例（`DSH_MOBILE_INSTANCE=1` + `DSH_MOBILE_PICKER_UI=1`）：
+  网关监听、hydrate 正常、boot HTML `nativeUi=false browseUi=true`；
+- **模拟手机 E2E 7/7**（配对 → 上游 401 → 令牌 302 → 303+`dsh-auth-*` cookie →
+  200 官方 UI（38,552 B）+ polyfill 注入 → `/api` Origin 匹配 404 而非 403）；
+- 本地 `dsh web`（无 mobile env）：`nativeUi=true browseUi=false`（出厂行为）。
+
+**结论：我们的插件不需要为 rc.3–rc.5 做任何改动**；只需把 rc.5 加入 `doctor` 的
+已实测清单（`VERIFIED_DSH_VERSIONS`），避免用户升级后看到「not in the verified list」告警。
+
 ## 0. 结论（TL;DR）
 
 | 级别 | 项 | 状态 |

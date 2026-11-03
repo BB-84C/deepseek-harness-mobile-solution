@@ -266,6 +266,15 @@ relay owner passkey 注册（可选）；移动 app 已决定**推迟**（战略
 版本边界与判定集中在 `packages/dsh-mobile-common/src/version.js`（`supportsNoOpen` /
 `needsLaunchToken` / `VERIFIED_DSH_VERSIONS`），`doctor` 与 `service start` 共用同一套判断。
 
+2026-11-03 复查（上游 rc.2 → rc.5：rc.3 10-23 / rc.4 10-26 / rc.5 10-29，`latest`=rc.5，
+`alpha`=0.2.2-alpha.2）：**插件无需改动**。逐包哈希比对显示我们依赖的 18 个包除版本号外只有 4 处
+变化（web-app 的 patch 纯新增一行 `entry-customization` 客户端行、web-frontend dist 重建、
+client-ui-agent-preset 客户端、api-session-controller 客户端类型；client-modules 只改了构建常量），
+命令行契约 / bundle patch / 兼容闸门 / 令牌握手 / 持久化形状 / 选择器行 id 全未变。
+隔离环境实测：三个版本判断（`readDshVersion`/`supportsNoOpen`/`hasPickerUi`）正确，
+mobile 启动 + hydrate + 网关正常，**模拟手机 E2E 7/7**，本地 `dsh web` 仍是出厂原生选择器。
+已把 `0.2.1-rc.5` 加入 `VERIFIED_DSH_VERSIONS` 并同步 README / 评估文档。
+
 ## 5. 仓库布局
 
 ```

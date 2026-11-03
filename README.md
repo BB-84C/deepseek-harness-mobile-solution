@@ -51,7 +51,7 @@ Everything lives behind **`dsh --profile mobile`** — `service`, `tailscale`, `
 
 ## Compatibility
 
-- **dsh**: verified on `0.1.0-rc.6` and `0.2.1-rc.2`. The gateway adapts to both sides of dsh's browser-token gate (`0.1.2-rc.1`+), so newer releases normally work unchanged.
+- **dsh**: verified on `0.1.0-rc.6`, `0.2.1-rc.2` and `0.2.1-rc.5`. The gateway adapts to both sides of dsh's browser-token gate (`0.1.2-rc.1`+), so newer releases normally work unchanged.
 - **Node.js**: ≥ 22 (the relay is zero-dependency).
 - `dsh --profile mobile doctor` prints your dsh version and whether it is on the verified list.
 - After upgrading dsh, run the 10-minute checklist in [`docs/research/upstream-touchpoints.md`](docs/research/upstream-touchpoints.md).

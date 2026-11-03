@@ -71,6 +71,7 @@
 | 2026-10 | 官方 HTML **gzip**（0.2.x `webserver.compression`） | ✅ M8：导航请求不透传 `accept-encoding`，polyfill 注入恢复（静态资源仍压缩） |
 | 2026-10 | 插件**版本兼容闸门**（`engines.dsh`/peers + `compatibility.json` + `allow-version`） | 我们未声明约束 → 实测不被拒；`doctor` 现在会报 dsh 版本与已实测清单 |
 | 2026-10 | Web UI 内建 **Plugins 页 / Config Editor**（Typert Remote，可重组合树） | ⏳ 仍待真机验收：手机端装/卸插件后我们的 bundle 仍在、`status` 正常（见 impact 文档 §7） |
+| 2026-11 | `0.2.1-rc.3`→`rc.5`：web-app patch 新增 `entry-customization` 客户端行；web-frontend dist、client-ui-agent-preset、api-session-controller 客户端类型更新 | ✅ 无需适配：18 个依赖包逐文件哈希比对，除版本号仅上述 4 处变化；rc.5 跑通 E2E 7/7 + 选择器两种 composition，已加入 `VERIFIED_DSH_VERSIONS` |
 | 2026-10 | cordis 的 **`inject` 只吃字符串数组**（对象形式被当成服务名 → 插件永远 pending → 整个 profile 启动失败） | ✅ 可选服务一律 `ctx.get()` 惰性取；已写进 impact 文档踩坑记录 |
 | 2026-08 | 常驻实例无 console → Windows 给每个子进程新建可见控制台窗口（弹窗） | ✅ M8：`node --require no-console-window.cjs` 预加载 `windowsHide: true`；需重启常驻实例生效 |
 | 2026-10 | `sessionPersistence.list()` 返回**快照包装** `{ header, formatStatus, revision, sizeBytes }`（0.1.x 是裸 header），且 `inspect(id)`/`prepare(id)` 已从服务面移除 | ✅ hydrate 同时接受两种形状并降级：无 `inspect` 时只枚举计数（0.2 的 `list()` 自身已按存储恢复规则读取每个 generation 头），无 `prepare` 时 ATTACH 模式自动跳过；新增 2 例回归测试 |
